@@ -11,6 +11,10 @@ TRI = Task register + Registers (decisions/assumptions/ADRs) + Increment evidenc
 
 All mechanics go through one script: `node <plugin>/scripts/tri.mjs` (run with no args for usage). Never hand-edit Status/Assignee fields — the script keeps them parseable.
 
+## Routing
+
+`/tri:go [focus]` is the entry point when the right command isn't obvious: it reads state, matches intent to exactly one command, runs it, and reports. Its rules live in the command file. Everything below is what it routes *to* — and what an experienced user invokes directly.
+
 ## The loop
 
 1. `tri.mjs next` — ready tasks (dependencies Done, unclaimed).
