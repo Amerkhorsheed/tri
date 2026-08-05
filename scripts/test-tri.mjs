@@ -122,9 +122,29 @@ check('claim marks task In Progress with assignee', () => {
   assertIncludes(t, 'dev-a');
 });
 
-check('claiming an already-claimed task fails without --force', () => {
-  const out = run(ws, ['claim', 'T-0001', '--by', 'dev-b'], true);
-  assertIncludes(out, 'dev-a');
+check('claim writes explicit machine-readable scope manifest', () => {
+  const scope = JSON.parse(readFileSync(join(ws, '.tri/claims/T-0001.json'), 'utf8'));
+  assert(scope.schemaVersion === 1, 'scope schema missing');
+  assert(scope.owner === 'dev-a', 'scope owner missing');
+  assert(scope.primaryTasks.includes('T-0001'), 'primary task missing');
+});
+
+check('claim refuses overlap with existing task scope', () => {
+  run(ws, ['release', 'T-0001']);
+  run(ws, ['claim', 'T-0001', '--by', 'dev-a']);
+  const scopeFile = join(ws, 'overlap.json');
+  writeFileSync(scopeFile, JSON.stringify({ schemaVersion: 1, owner: 'dev-c', kind: 'task', primaryTasks: ['T-0002'], coveredTasks: ['T-0001'], mayCover: [], responsibilities: [], relatedADRs: [] }));
+  const out = run(ws, ['claim', 'T-0002', '--by', 'dev-c', '--scope', 'overlap.json'], true);
+  assertIncludes(out, 'claim scope overlap');
+  rmSync(scopeFile);
+});
+
+check('validate rejects malformed claim scope', () => {
+  const p = join(ws, '.tri/claims/bad.json');
+  writeFileSync(p, '{bad');
+  const out = run(ws, ['validate'], true);
+  assertIncludes(out, 'not valid JSON');
+  rmSync(p);
 });
 
 check('claim of a not-ready task warns but succeeds (advisory, never blocks)', () => {

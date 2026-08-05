@@ -46,7 +46,7 @@ claude plugin install tri@tri</code></pre>
 <section>
 <h2 style="margin-top:0">Parallel developers &amp; agents</h2>
 <img class="diagram" src="tri-team.svg" alt="tri parallel model: dynamic pull-based claims from a shared frontier, git as the lock">
-<p>No pre-assigned ranges. Claim when you start, claim more when you finish. In <code>branch-pr</code> workflow the pushed task branch is the visible lock; command workflows verify remote refs after pushes, stop on failure, and ask explicitly before opening or merging a PR against the development base. The frontier is only ever read from the default branch.</p>
+<p>No pre-assigned ranges. Claim when you start. Every claim writes a committed <code>.tri/claims/&lt;task-id&gt;.json</code> scope manifest naming owner, primary/covered/may-cover tasks, responsibilities, and related ADRs. TRI refuses exact scope overlap, fails closed on malformed scope, and never infers ownership from branch names. In <code>branch-pr</code> workflow the pushed task branch plus verified manifest ref is the visible lock; command workflows verify remote refs after pushes, stop on failure, and ask explicitly before opening or merging a PR against the development base.</p>
 </section>
 
 <section>

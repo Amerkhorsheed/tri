@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.0 — 2026-08-05
+
+- Added explicit claim-scope manifests with task, responsibility, ADR, owner, and future-coverage fields. Claims validate and refuse overlapping local scopes instead of inferring ownership from branch names.
+
 ## 2.0.3 — 2026-08-05
 
 - Numeric phase creation now refuses when canonical and suffixed directories coexist, preventing a silent split even when both names already exist.

@@ -3,7 +3,7 @@
 // Commands: init, new-task, validate, next, claim, release, done, status, graph.
 
 import {
-  readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, appendFileSync,
+  readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, appendFileSync, rmSync,
 } from 'node:fs';
 import { join, dirname, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,8 +37,103 @@ function loadConfig() {
   }
   return {
     root, idPrefix: 'T-', idWidth: 4, evidenceDir: 'tri/evidence',
-    statuses: STATUSES, companionFiles: [], ...cfg,
+    statuses: STATUSES, companionFiles: [], claimScope: {}, ...cfg,
   };
+}
+
+// ---------- claim scope ----------
+const CLAIM_KINDS = ['task', 'responsibility', 'architecture', 'run', 'ship'];
+function globToRegExp(glob) {
+  const escaped = glob.split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*');
+  return new RegExp(`^${escaped}$`);
+}
+function pathMatches(path, patterns) { return patterns.some((pattern) => globToRegExp(pattern).test(path)); }
+function validatePathList(scope, field, file) {
+  const values = scopeList(scope[field], field, file);
+  for (const value of values) if (value.startsWith('/') || value.includes('..')) fail(`claim scope ${file}: ${field} must use repository-relative paths`);
+  return values;
+}
+function claimManifestPath(cfg, id) {
+  const dir = cfg.claimScope?.directory ?? '.tri/claims';
+  return join(cfg.root, dir, `${id}.json`);
+}
+function listClaimManifests(cfg) {
+  const dir = join(cfg.root, cfg.claimScope?.directory ?? '.tri/claims');
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => join(dir, f)).sort();
+}
+function readClaimManifest(file) {
+  let value;
+  try { value = JSON.parse(readFileSync(file, 'utf8')); } catch (e) { fail(`claim scope ${file} is not valid JSON: ${e.message}`); }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) fail(`claim scope ${file} must be an object`);
+  return value;
+}
+function scopeList(value, field, file) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((x) => typeof x !== 'string' || !x.trim())) fail(`claim scope ${file}: ${field} must be an array of non-empty strings`);
+  const result = value.map((x) => x.trim());
+  if (new Set(result).size !== result.length) fail(`claim scope ${file}: ${field} contains duplicates`);
+  return result;
+}
+function validateClaimScope(cfg, scope, tasks, file = '<scope>') {
+  if (scope.schemaVersion !== 1) fail(`claim scope ${file}: schemaVersion must be 1`);
+  if (typeof scope.owner !== 'string' || !scope.owner.trim()) fail(`claim scope ${file}: owner required`);
+  if (!CLAIM_KINDS.includes(scope.kind)) fail(`claim scope ${file}: kind must be ${CLAIM_KINDS.join(', ')}`);
+  const primary = scopeList(scope.primaryTasks, 'primaryTasks', file);
+  if (!primary.length) fail(`claim scope ${file}: primaryTasks must not be empty`);
+  const covered = scopeList(scope.coveredTasks, 'coveredTasks', file);
+  const mayCover = scopeList(scope.mayCover, 'mayCover', file);
+  const responsibilities = scopeList(scope.responsibilities, 'responsibilities', file);
+  const adrs = scopeList(scope.relatedADRs, 'relatedADRs', file);
+  const writePaths = validatePathList(scope, 'writePaths', file);
+  const readPaths = validatePathList(scope, 'readPaths', file);
+  const forbiddenPaths = validatePathList(scope, 'forbiddenPaths', file);
+  const sharedPaths = validatePathList(scope, 'sharedPaths', file);
+  const known = new Set(tasks.map((t) => t.id));
+  for (const id of [...primary, ...covered, ...mayCover]) if (!known.has(id)) fail(`claim scope ${file}: unknown task ${id}`);
+  const labels = cfg.claimScope?.responsibilities;
+  if (Array.isArray(labels)) for (const label of responsibilities) if (!labels.includes(label)) fail(`claim scope ${file}: unknown responsibility ${label}`);
+  const allTasks = [...primary, ...covered, ...mayCover];
+  if (new Set(allTasks).size !== allTasks.length) fail(`claim scope ${file}: task appears in multiple scope lists`);
+  return { ...scope, primaryTasks: primary, coveredTasks: covered, mayCover, responsibilities, relatedADRs: adrs, writePaths, readPaths, forbiddenPaths, sharedPaths };
+}
+function scopeConflicts(candidate, existing) {
+  const conflicts = [];
+  const candidateTasks = [...candidate.primaryTasks, ...candidate.coveredTasks, ...candidate.mayCover];
+  const existingTasks = [...existing.primaryTasks, ...existing.coveredTasks, ...existing.mayCover];
+  const overlap = candidateTasks.filter((x) => existingTasks.includes(x));
+  if (overlap.length) conflicts.push(`tasks: ${[...new Set(overlap)].join(', ')}`);
+  for (const field of ['responsibilities', 'relatedADRs']) {
+    const overlap = candidate[field].filter((x) => existing[field].includes(x));
+    if (overlap.length) conflicts.push(`${field}: ${overlap.join(', ')}`);
+  }
+  for (const candidatePath of candidate.writePaths) {
+    if (pathMatches(candidatePath, existing.writePaths)) conflicts.push(`writePaths: ${candidatePath}`);
+    if (pathMatches(candidatePath, existing.sharedPaths)) conflicts.push(`sharedPaths: ${candidatePath}`);
+  }
+  return conflicts;
+}
+function checkClaimScope(cfg, candidate, tasks, ignoreFile) {
+  const manifests = [];
+  for (const file of listClaimManifests(cfg)) {
+    if (file === ignoreFile) continue;
+    manifests.push({ file, scope: validateClaimScope(cfg, readClaimManifest(file), tasks, file) });
+  }
+  const conflicts = manifests.flatMap(({ file, scope }) => scopeConflicts(candidate, scope).map((c) => `${file}: ${c}`));
+  if (conflicts.length) fail(`claim scope overlap; resolve before claiming:\n${conflicts.join('\n')}`);
+}
+function claimScopeFor(cfg, id, by, args, tasks) {
+  const supplied = argValue(args, '--scope');
+  const scope = supplied ? readClaimManifest(resolve(cfg.root, supplied)) : {
+    schemaVersion: 1, owner: by, branch: process.env.GIT_BRANCH ?? null, claimCommit: process.env.GIT_COMMIT ?? null, kind: 'task', primaryTasks: [id], coveredTasks: [], mayCover: [], responsibilities: [], relatedADRs: [], writePaths: [], readPaths: [], forbiddenPaths: [], sharedPaths: [], baseBranch: cfg.baseBranch ?? null,
+  };
+  if (!scope.primaryTasks?.length) scope.primaryTasks = [id];
+  if (!scope.owner) scope.owner = by;
+  const checked = validateClaimScope(cfg, scope, tasks, supplied ?? claimManifestPath(cfg, id));
+  if (checked.owner !== by && !args.includes('--force')) fail(`claim scope owner ${checked.owner} differs from --by ${by}`);
+  if (!checked.primaryTasks.includes(id)) fail(`claim scope primaryTasks must include ${id}`);
+  checkClaimScope(cfg, checked, tasks, claimManifestPath(cfg, id));
+  return checked;
 }
 
 // ---------- task parsing ----------
@@ -242,6 +337,12 @@ function cmdValidate() {
       if (unmet.length) warnings.push(`${t.id}: claimed by ${t.assignee} but dependencies not Done: ${unmet.join(', ')}`);
     }
   }
+  for (const file of listClaimManifests(cfg)) validateClaimScope(cfg, readClaimManifest(file), tasks, file);
+  const claimed = listClaimManifests(cfg);
+  for (const file of claimed) {
+    const scope = validateClaimScope(cfg, readClaimManifest(file), tasks, file);
+    for (const path of scope.forbiddenPaths) if (scope.writePaths.some((p) => pathMatches(p, [path]))) fail(`claim scope ${file}: writePaths includes forbidden path ${path}`);
+  }
   // cycle detection
   const state = new Map();
   const stack = [];
@@ -291,6 +392,10 @@ function cmdClaim(args) {
   if (t.status === 'In Progress' && t.assignee !== 'N/A' && t.assignee !== by && !args.includes('--force')) {
     fail(`${id} is already claimed by ${t.assignee}; use --force to take it over`);
   }
+  const scope = claimScopeFor(cfg, id, by, args, tasks);
+  const scopePath = claimManifestPath(cfg, id);
+  mkdirSync(dirname(scopePath), { recursive: true });
+  writeFileSync(scopePath, JSON.stringify(scope, null, 2) + '\n');
   const unmet = t.deps.filter((d) => map.get(d)?.status !== 'Done');
   if (unmet.length) out(`warning: ${id} has dependencies not Done: ${unmet.join(', ')} — claim is advisory, proceeding`);
   setSection(t, 'Status', 'In Progress');
@@ -315,6 +420,8 @@ function cmdRelease(args) {
   }
   setSection(t, 'Status', 'Planned');
   setSection(parseTask(t.file, cfg), 'Assignee', 'N/A');
+  const scopePath = claimManifestPath(cfg, id);
+  if (existsSync(scopePath)) rmSync(scopePath);
   out(`${id} released back to Planned`);
 }
 
