@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 — 2026-08-05
+
+- Structured questions are now the default way every command asks for a decision.
+  Options are selectable, the recommended one comes first and is marked, each
+  carries its tradeoff, and up to four independent questions batch into one turn.
+  Prose is reserved for genuinely open-ended answers. `/tri:run` asks scope and
+  mode this way; `/tri:grill` stays deliberately one question at a time because
+  each answer shapes the next.
+
 ## 1.0.0 — 2026-08-05
 
 First version adopted as a team baseline. Verified against a production

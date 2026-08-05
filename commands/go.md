@@ -2,7 +2,7 @@
 description: Say what you want to work on; tri reads the state, picks the right command, and runs it
 argument-hint: "[what you want to focus on — a task, a phase, an area, a goal, or nothing]"
 ---
-Load the tri-method skill first. This command is a router: read the workspace state, interpret $ARGUMENTS, choose the one command that actually fits, say in a sentence which you chose and why, then **run it** — do not stop at a recommendation, and do not ask the user to pick unless two paths are genuinely equal.
+Load the tri-method skill first. This command is a router: read the workspace state, interpret $ARGUMENTS, choose the one command that actually fits, say in a sentence which you chose and why, then **run it** — do not stop at a recommendation. If two routes are genuinely equal, put the choice to the user with AskUserQuestion (recommended first, consequence in each description) rather than describing the options in prose.
 
 **1. Read state before deciding** (always, even for an explicit-sounding request):
 `node ~/.tri/scripts/tri.mjs status --json`, `next --json`, and `graph`. If `.tri/run.json` exists with unfinished queue entries, an interrupted batch outranks everything — resume it via /tri:run unless $ARGUMENTS clearly asks for something else.

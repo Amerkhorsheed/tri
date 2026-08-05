@@ -4,11 +4,9 @@ argument-hint: "[phase NN | N | T-NNNN T-NNNN... | resume]"
 ---
 Load the tri-method skill first (its Batch runs section defines the state file and stop conditions).
 
-**1. Resume check.** If `.tri/run.json` exists with unfinished queue entries, summarize it (scope, done, remaining) and ask: resume or start fresh. `$ARGUMENTS` = `resume` skips the question.
+**1. Resume check.** If `.tri/run.json` exists with unfinished queue entries, summarize it (scope, done, remaining) and ask via AskUserQuestion: resume or start fresh. `$ARGUMENTS` = `resume` skips the question.
 
-**2. Scope.** If $ARGUMENTS names a scope (phase, count, task list), use it. Otherwise research first: run `node ${CLAUDE_PLUGIN_ROOT}/scripts/tri.mjs status --json`, `next --json`, and `graph`, then present the real options with numbers — e.g. "frontier: 4 ready; phase 09 has 6 workable; until-blocked reaches ~14 tasks" — and ask the user to pick: **until natural stop** / **one phase** / **N tasks** / **named tasks**.
-
-**3. Execution mode.** Ask: sequential, or parallel with M subagents. Recommend parallel only when the ready tasks in scope touch disjoint files (check Expected files / module paths); otherwise recommend sequential and say why.
+**2. Scope.** If $ARGUMENTS names a scope (phase, count, task list), use it. Otherwise research first: run `node ${CLAUDE_PLUGIN_ROOT}/scripts/tri.mjs status --json`, `next --json`, and `graph`, then present the real options with numbers — e.g. "frontier: 4 ready; phase 09 has 6 workable; until-blocked reaches ~14 tasks" — then **ask scope and execution mode together in one AskUserQuestion call** (two questions, four options each at most): scope — *until natural stop* / *one phase* / *N tasks* / *named tasks*, with the real counts in each description; mode — *sequential* / *parallel with M subagents*. Recommend parallel only when the ready tasks in scope touch disjoint files (check Expected files / module paths); otherwise recommend sequential and say why in the option description.
 
 **4. Write state** to `.tri/run.json`: `{scope, mode, queue, done, blocked, startedAt}`. Update it after every task — the run must survive a session restart.
 

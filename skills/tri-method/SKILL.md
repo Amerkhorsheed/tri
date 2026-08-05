@@ -15,6 +15,15 @@ All mechanics go through one script: `node <plugin>/scripts/tri.mjs` (run with n
 
 `/tri:go [focus]` is the entry point when the right command isn't obvious: it reads state, matches intent to exactly one command, runs it, and reports. Its rules live in the command file. Everything below is what it routes *to* — and what an experienced user invokes directly.
 
+## Asking the user
+
+When a command needs a decision from the user, **present it with the structured question tool (AskUserQuestion), not as prose.** It renders selectable options, batches up to four independent questions in one turn, always allows free-text "Other", and produces an answer you can write straight into a task file or register.
+
+- Put your recommended option **first** and mark it `(Recommended)`. State the tradeoff in each option's description — the user is choosing, not guessing.
+- Batch independent decisions into one call (max four). Ask sequentially only when a later question depends on an earlier answer — `/tri:grill` is deliberately one at a time for that reason.
+- Use prose instead only when the answer is genuinely open-ended (wording an Objective, naming a thing) or when nothing is actually being decided.
+- Never ask what the repository can answer. Read the files, run the script, then ask only the decisions.
+
 ## The loop
 
 1. `tri.mjs next` — ready tasks (dependencies Done, unclaimed).
