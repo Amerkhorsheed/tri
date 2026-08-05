@@ -24,6 +24,21 @@ When a command needs a decision from the user, **present it with the structured 
 - Use prose instead only when the answer is genuinely open-ended (wording an Objective, naming a thing) or when nothing is actually being decided.
 - Never ask what the repository can answer. Read the files, run the script, then ask only the decisions.
 
+## Preflight — before any work command commits anything
+
+`/tri:next`, `/tri:ship`, and `/tri:run` all start here. It takes one command and prevents the two failures that actually mix work up:
+
+```
+git status --porcelain && git branch --show-current
+```
+
+- **Uncommitted changes to tracked files** → stop. Report what is dirty and ask whether to commit, stash, or proceed deliberately. Never start new work on top of someone's half-finished edit — including your own from a previous session.
+- **`branch-pr` workflow and you are on the default branch** → create the work branch *before* the first commit. This is the failure that silently lands specs or code on `main`.
+- **`branch-pr` and you are on another task's branch** → say so and branch from the default branch instead. Stacking unrelated work on a task branch makes its PR unreviewable.
+- **`trunk` workflow** → the dirty check still applies; the branch checks do not.
+
+Branch naming: one task → `<task-id-lowercase>-<slug>`. A `/tri:ship` run → `ship/<date>-<slug>`. A `/tri:run` batch → `run/<date>-<scope>`.
+
 ## The loop
 
 1. `tri.mjs next` — ready tasks (dependencies Done, unclaimed).

@@ -4,6 +4,10 @@ argument-hint: "<a feature, area, phase, or goal — e.g. \"the admin surface\" 
 ---
 Load the tri-method skill first. This command runs four stages in order. Stages 1-3 are interactive by nature. Stage 4 runs unattended. **There is exactly one pause between them, and it is not optional** — a specification error costs seconds to fix before implementation and days after.
 
+## Stage 0 — Preflight
+
+Run the preflight in the tri-method skill: `git status --porcelain && git branch --show-current`. Stop on a dirty worktree and ask before touching anything. In `branch-pr` workflow, **create the run branch now** — `ship/<date>-<slug>` from the default branch — so that neither the specification commit nor any implementation commit can land on the default branch. Push it immediately: the pushed branch is the claim on this scope.
+
 ## Stage 1 — Scope
 
 Read `node ~/.tri/scripts/tri.mjs status --json`, `next --json`, and `graph`. Resolve $ARGUMENTS against the real task tree. If `.tri/run.json` holds an unfinished queue, resume that instead of starting fresh.
@@ -34,14 +38,14 @@ Write the answers into the artifacts, not into the conversation:
 - An ADR for any architectural decision — new dependency, service, boundary, or changed contract — **before** it can be implemented. If a task in scope needs one, it stays Blocked until that ADR is Accepted, and the run continues with the others.
 - New work discovered: `new-task`, never folded into an existing task. Honor `companionFiles` — update the indexes and pinned counts the script names.
 
-Run the project's validators. Commit the specifications as their own commit, separate from any implementation.
+Run the project's validators. Commit the specifications as their own commit on the branch created in stage 0 — separate from any implementation commit, so the specification is revertable and reviewable on its own.
 
 ## The gate
 
 Report what was specified, what was decided, what is blocked and by whom, and exactly which tasks are about to be implemented. Then ask, with AskUserQuestion:
 
 - **Proceed** — implement the queue now.
-- **Review first** — stop here; the specification commit stands on its own and the user resumes later with `/tri:ship resume` or `/tri:run`.
+- **Review first** — stop here and open a PR for the specification commit alone. It stands on its own; the user resumes later with `/tri:ship resume` or `/tri:run`.
 - **Adjust** — return to stage 2 for the tasks the user names.
 
 Do not proceed without an explicit answer. This is the only pause; make it count by reporting honestly rather than optimistically.
@@ -50,7 +54,7 @@ Do not proceed without an explicit answer. This is the only pause; make it count
 
 Hand off to the `/tri:run` loop with the queue from stage 3, and follow its rules exactly: ask the scope-and-mode question once (sequential, or parallel subagents when the tasks touch disjoint files), record the queue with `run-state --start`, then run task after task — claim, implement, test, evidence, `validate`, `done`, commit — **with no further questions**. A task needing an owner decision gets its `B-` entry and is parked while the run continues. Halt only on a red gate after a real fix attempt, or when nothing runnable remains.
 
-Honor the configured `workflow`: in `branch-pr`, a sequential run uses one run branch with an atomic commit per task and a PR per phase boundary; parallel runs use per-task branches.
+Stay on the stage-0 branch: implementation commits stack on top of the specification commit, one atomic commit per task, and the PR at the end (or per phase boundary) carries both. Parallel subagent runs still use per-task branches, since simultaneous workers cannot share one.
 
 ## Finish
 

@@ -71,6 +71,10 @@ Like GSD's execute-phase or spec-kit's implement, `/tri:run` chews through many 
 
 Claiming is **dynamic and pull-based** — no pre-assigned ranges. Claim when you start, claim more when you finish; a fast day means more claims, and adding tasks mid-flight is normal (`new-task`). Consistency comes from git: a claim is a commit; simultaneous claims resolve at push (first wins, second picks the next ready task). Dependency warnings on claims are advisory — the tool never blocks a split you chose deliberately.
 
+## Before work starts
+
+Every work command runs a preflight first: stop on a dirty worktree, and in `branch-pr` workflow cut the work branch from the default branch before the first commit. This is what keeps two features from landing in one branch, and keeps specifications and code off `main`.
+
 ## Batch state and recovery
 
 `run-state` is the mechanical record of a batch: `--start` with a scope, mode and queue; `--done`/`--blocked` after each task; `--finish` at the end. Bare `run-state` prints what remains, so a session killed mid-batch resumes exactly where it stopped rather than relying on the agent having remembered. The file lives in gitignored `.tri/` and is never hand-edited.

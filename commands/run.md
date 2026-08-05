@@ -4,6 +4,8 @@ argument-hint: "[phase NN | N | T-NNNN T-NNNN... | resume]"
 ---
 Load the tri-method skill first (its Batch runs section defines the state file and stop conditions).
 
+**0. Preflight.** Run the tri-method preflight: `git status --porcelain && git branch --show-current`. Stop on a dirty worktree. In `branch-pr` workflow create the run branch (`run/<date>-<scope>`) from the default branch before any commit, and push it immediately.
+
 **1. Resume check.** Run `node ~/.tri/scripts/tri.mjs run-state`. If it reports an active run, summarize it and ask via AskUserQuestion: resume or start fresh. `$ARGUMENTS` = `resume` skips the question.
 
 **2. Scope.** If $ARGUMENTS names a scope (phase, count, task list), use it. Otherwise research first: run `node ${CLAUDE_PLUGIN_ROOT}/scripts/tri.mjs status --json`, `next --json`, and `graph`, then present the real options with numbers — e.g. "frontier: 4 ready; phase 09 has 6 workable; until-blocked reaches ~14 tasks" — then **ask scope and execution mode together in one AskUserQuestion call** (two questions, four options each at most): scope — *until natural stop* / *one phase* / *N tasks* / *named tasks*, with the real counts in each description; mode — *sequential* / *parallel with M subagents*. Recommend parallel only when the ready tasks in scope touch disjoint files (check Expected files / module paths); otherwise recommend sequential and say why in the option description.

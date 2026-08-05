@@ -5,7 +5,7 @@ argument-hint: "[what you want to focus on — a task, a phase, an area, a goal,
 Load the tri-method skill first. This command is a router: read the workspace state, interpret $ARGUMENTS, choose the one command that actually fits, say in a sentence which you chose and why, then **run it** — do not stop at a recommendation. If two routes are genuinely equal, put the choice to the user with AskUserQuestion (recommended first, consequence in each description) rather than describing the options in prose.
 
 **1. Read state before deciding** (always, even for an explicit-sounding request):
-`node ~/.tri/scripts/tri.mjs status --json`, `next --json`, and `graph`. If `.tri/run.json` exists with unfinished queue entries, an interrupted batch outranks everything — resume it via /tri:run unless $ARGUMENTS clearly asks for something else.
+`git status --porcelain`, `git branch --show-current`, then `node ~/.tri/scripts/tri.mjs status --json`, `next --json`, and `graph`. A dirty worktree or an unexpected current branch is reported to the user before routing anywhere — the routed command will need it resolved regardless. If `.tri/run.json` exists with unfinished queue entries, an interrupted batch outranks everything — resume it via /tri:run unless $ARGUMENTS clearly asks for something else.
 
 **2. Match intent to command.** In priority order — first match wins:
 

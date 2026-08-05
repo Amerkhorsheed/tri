@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.6.0 — 2026-08-05
+
+- Preflight before any work command commits: stop on a dirty worktree, and in
+  `branch-pr` workflow cut the work branch from the default branch first.
+  `/tri:ship` had no branch instruction at all, so a specification commit would
+  have landed on the default branch; nothing anywhere checked for uncommitted
+  work, so a new task could be started on top of a half-finished edit.
+- `/tri:ship` cuts `ship/<date>-<slug>` in a new stage 0, keeps the
+  specification commit and implementation commits on it, and can PR the
+  specification alone when the user chooses to review before implementing.
+
 ## 1.5.0 — 2026-08-05
 
 Found by adversarial probing of concurrency, recovery, and malformed input.
