@@ -59,7 +59,7 @@ node scripts/tri.mjs <init|new-task|validate|next|claim|release|done|status|grap
 
 ## Branch and PR workflows
 
-`"workflow": "trunk"` (default) or `"branch-pr"` in `tri.config.json`. Trunk: pushed claim commit = the lock. Branch-pr: one branch per task (`task-0261-endpoint-enforcement`), the pushed branch is the lock (checked before claiming), `done` flips status inside the branch and becomes truth when the PR merges, and the frontier is only read from the default branch. The script itself never runs git — an autonomous bookkeeping tool that silently pushes is a failure mode, so branch/PR mechanics stay in the command/skill layer where they're visible.
+`"workflow": "trunk"` (default) or `"branch-pr"` in `tri.config.json`. Trunk: pushed claim commit = the lock. Branch-pr: one branch per task (`task-0261-endpoint-enforcement`), the pushed branch is the lock (checked before claiming), `done` flips status inside the branch and becomes truth when the PR merges, and the frontier is only read from the default branch. Command workflows push claim/work commits immediately, verify the remote ref, stop on push failure, and ask before opening or merging a PR against the configured development base; they never merge silently. The script itself never runs git — branch/PR mechanics stay in the command/skill layer where they're visible.
 
 ## Batch execution vs the gates
 
@@ -115,6 +115,8 @@ tri reads foreign task formats through config instead of rewriting files. Exampl
 
 `taskTemplate` makes `new-task` write the project's own template rather than tri's — the project's fields are what its validators enforce. `companionFiles` are files tri deliberately does not edit (task indexes, pinned inventory counts) but names on every creation so they move in the same change.
 
+When creating a task, `--phase NN` targets `phase-NN`. If an existing task tree has exactly one suffixed directory such as `phase-12-mobile`, tri reuses it; `--phase NN-label` targets that exact label. Multiple suffixed matches fail instead of choosing silently. A new phase with no match gets the canonical `phase-NN` directory.
+
 Drop that in as `tri.config.json` and every command works against the existing tree byte-for-byte unchanged (claims add an `## Assignee` section on first claim; nothing else is rewritten). Verified against a production workspace of 338 governed task files: `validate` clean, frontier and critical-path output matching an independent analysis.
 
 ## Tests and consistency
@@ -125,4 +127,4 @@ node scripts/test-tri.mjs && node scripts/check-consistency.mjs
 
 The consistency check fails when a change reaches one artifact but not its companions — an undocumented command or config key, a version without a changelog entry, a stale test count, a broken link. See [CONTRIBUTING.md](CONTRIBUTING.md) for what must move together.
 
-38 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, and graph metrics.
+41 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, phase directory compatibility, and graph metrics.
