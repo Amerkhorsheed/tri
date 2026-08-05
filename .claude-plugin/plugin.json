@@ -1,0 +1,6 @@
+{
+  "name": "tri",
+  "description": "TRI delivery method: task register, decision/assumption registers, ADRs, dynamic claiming for parallel devs, evidence-gated done. Works with Claude Code commands and Codex via AGENTS.md.",
+  "version": "0.1.0",
+  "author": { "name": "Amer Khorsheed" }
+}

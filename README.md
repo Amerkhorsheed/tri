@@ -1,0 +1,54 @@
+# tri
+
+Delivery method plugin: **T**ask register + **R**egisters (decisions, assumptions, ADRs) + **I**ncrement evidence. Extracted from a production architecture workspace; in the family of GSD and spec-kit, with two differences: an append-only decision/assumption register ("never choose silently") and an evidence-gated definition of done.
+
+State is plain markdown under `tri/` in your project, merged through git. No server, no daemon. One zero-dependency Node script does all mechanics.
+
+## Install
+
+Claude Code (as a plugin):
+
+```bash
+claude --plugin-dir /path/to/tri
+```
+
+or add the repo to your plugin marketplace and install `tri`.
+
+Codex / any other agent: works through the project's `AGENTS.md` — `/tri:init` appends a "TRI Method" section that instructs any agent to follow the same loop and run the same script. No Claude-specific machinery required.
+
+## Commands
+
+| Command | Does |
+|---|---|
+| `/tri:init [profile]` | Scaffold `tri/` workspace + `tri.config.json` + AGENTS.md section. Profiles: `lite`, `standard` (default), `strict` |
+| `/tri:plan <spec>` | Decompose a spec into tasks with real (not ceremonial) dependency edges |
+| `/tri:next [T-NNNN]` | Show ready tasks; claim and start one |
+| `/tri:done <T-NNNN>` | Evidence-gated completion |
+| `/tri:status` | Counts, claims, ready frontier, critical path |
+| `/tri:decide <text>` | Append a D- (resolved) or B- (blocking) entry to the decision register |
+| `/tri:adr <text>` | Write an ADR from the template |
+
+Direct script use (what agents and CI run):
+
+```bash
+node scripts/tri.mjs <init|new-task|validate|next|claim|release|done|status|graph>
+```
+
+## Parallel developers
+
+Claiming is **dynamic and pull-based** — no pre-assigned ranges. Claim when you start, claim more when you finish; a fast day means more claims, and adding tasks mid-flight is normal (`new-task`). Consistency comes from git: a claim is a commit; simultaneous claims resolve at push (first wins, second picks the next ready task). Dependency warnings on claims are advisory — the tool never blocks a split you chose deliberately.
+
+## Profiles
+
+| | lite | standard | strict |
+|---|---|---|---|
+| Task fields | ~8 | ~18 | ~28 |
+| Done gate | `validate` passes | + Evidence section filled | + evidence record file in `tri/evidence/` |
+
+## Tests
+
+```bash
+node scripts/test-tri.mjs
+```
+
+18 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, and graph metrics.
