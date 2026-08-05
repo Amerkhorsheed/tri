@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.2 — 2026-08-05
+
+- Fixed `new-task --phase NN` for existing task trees with named phase directories. When exactly one `phase-NN-*` directory exists, tri reuses it instead of creating a parallel `phase-NN` tree; exact `NN-label` input is supported and ambiguous matches fail closed.
+- Command workflows now require immediate push/ref verification after claims and work commits, stop on push failure, and ask explicitly before opening or merging PRs.
+
 ## 2.0.1 — 2026-08-05
 
 - Fixed dangling references left by the 2.0.0 removals: /tri:go still routed

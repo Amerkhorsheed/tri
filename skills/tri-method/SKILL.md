@@ -89,7 +89,7 @@ git ls-remote --heads origin
 | Local work branch exists but is unpushed | The claim is invisible to everyone else. Push it before working |
 | Task status differs between your ref and the default branch | Trust the default branch; status on an unmerged branch is a proposal |
 
-Push the claim commit immediately. A claim that only exists locally protects nobody.
+- Push the claim commit immediately. A claim that only exists locally protects nobody. After every claim or task commit, verify the remote branch/ref equals the local commit; a failed push stops the workflow. After evidence completion, ask before opening a PR against the configured development base and ask separately before merging; never assume or merge silently.
 
 ### Branch naming
 
@@ -103,13 +103,13 @@ One task → `<task-id-lowercase>-<slug>`. A ship run → `ship/<date>-<slug>`. 
 4. Implement exactly that task. New work discovered → `tri.mjs new-task`, never scope-fold.
 5. Record assumptions in `tri/ASSUMPTIONS.md`; unresolved choices in `tri/DECISIONS.md` as blocking entries. **Never choose silently.**
 6. Fill the task's Evidence section (commands + observed results). Strict profile: also `tri/evidence/<ID>-<date>.md`.
-7. `tri.mjs validate` must pass, then `tri.mjs done T-NNNN`, commit, push.
+7. `tri.mjs validate` must pass, then `tri.mjs done T-NNNN`, commit, push, and verify the remote ref.
 
 ## Parallel work (dynamic claiming)
 
 Claiming is pull-based and dynamic: claim when you start, claim more when you finish, any dev any day. No pre-assigned ranges. Rules that keep it consistent:
 
-- A claim is real only once committed/pushed. Two devs claiming the same task = push conflict; first push wins, second runs `next` and picks another.
+- A claim is real only once committed/pushed. Two devs claiming the same task = push conflict; first push wins, second runs `next` and picks another. Never treat a local commit as a remote claim.
 - `release` on a task held by someone else requires `--force`, the same protection `claim` has. Pass `--by <name>` so the check can fire.
 - `new-task` allocates the next id from the **local** tree. Two developers creating a task from the same base get the same id; pull before pushing, and `validate` catches the duplicate if you don't.
 - Claims are **advisory**: the script warns (never blocks) when claiming a task with unmet dependencies — the dev is trusted to know why.
@@ -137,9 +137,9 @@ Mid-run rules: never ask the user between tasks. A task needing an owner decisio
 **branch-pr:** one branch per task, named `<task-id-lowercase>-<slug>` (e.g. `task-0261-endpoint-enforcement`). Rules that keep claims and status truthful:
 
 - Before claiming, check remote branches (`git ls-remote --heads origin`): a branch named for the task ID is a claim, and a pushed `run/*` branch claims every task in its first (claim) commit.
-- The claim commit is the branch's first commit; push the branch immediately — the pushed branch is the visible lock.
+- The claim commit is the branch's first commit; push the branch immediately, verify the remote ref, and stop on push failure — the pushed branch is the visible lock.
 - `done` flips status inside the same branch; the PR merge lands the flip. **The frontier is only ever read from the default branch** — status on an unmerged branch is a proposal, not truth.
-- One task per branch per PR, no batching. PRs merge on green `validate` + project tests; changes touching contract/shared files wait for the other dev's review per the parallel-work rules.
+- One task per branch per PR, no batching. Ask before opening or merging a PR into the configured development base; merge only on green `validate` + project tests, and changes touching contract/shared files wait for the other dev's review per the parallel-work rules.
 
 ## Decisions and ADRs
 

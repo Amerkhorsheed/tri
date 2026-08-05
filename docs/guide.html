@@ -46,7 +46,7 @@ claude plugin install tri@tri</code></pre>
 <section>
 <h2 style="margin-top:0">Parallel developers &amp; agents</h2>
 <img class="diagram" src="tri-team.svg" alt="tri parallel model: dynamic pull-based claims from a shared frontier, git as the lock">
-<p>No pre-assigned ranges. Claim when you start, claim more when you finish. In <code>branch-pr</code> workflow the pushed task branch is the visible lock; the frontier is only ever read from the default branch.</p>
+<p>No pre-assigned ranges. Claim when you start, claim more when you finish. In <code>branch-pr</code> workflow the pushed task branch is the visible lock; command workflows verify remote refs after pushes, stop on failure, and ask explicitly before opening or merging a PR against the development base. The frontier is only ever read from the default branch.</p>
 </section>
 
 <section>
@@ -115,6 +115,7 @@ claude plugin install tri@tri</code></pre>
   "companionFiles": ["tasks/README.md", "tasks/validate-tasks.mjs"]
 }</code></pre>
 <p><code>taskTemplate</code> makes <code>new-task</code> write <b>your</b> template — your fields are what your validators enforce. <code>companionFiles</code> are files tri deliberately refuses to edit (task indexes, pinned inventory counts) but names on every creation so they move in the same change. A pinned count is an anti-drift control; a tool that silently updated it would defeat its purpose.</p>
+<p>For <code>--phase NN</code>, tri uses <code>phase-NN</code> when present. In an existing tree, one suffixed match such as <code>phase-12-mobile</code> is reused; <code>--phase NN-label</code> selects an exact label. Multiple suffixed matches fail rather than choosing silently. A phase with no match creates canonical <code>phase-NN</code>.</p>
 </section>
 
 <section>

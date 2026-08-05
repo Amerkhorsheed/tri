@@ -89,6 +89,34 @@ function loadTasks(cfg) {
   return taskFiles(cfg).map((f) => parseTask(f, cfg));
 }
 
+function resolvePhaseDir(cfg, phase) {
+  const value = String(phase).trim();
+  if (!/^\d+(?:-[A-Za-z0-9][A-Za-z0-9-]*)?$/.test(value)) {
+    fail(`invalid phase "${phase}" — use NN or NN-label`);
+  }
+
+  const taskRoot = join(cfg.root, cfg.taskDir);
+  const exactName = `phase-${value}`;
+  const exact = join(taskRoot, exactName);
+  if (existsSync(exact)) {
+    if (!statSync(exact).isDirectory()) fail(`phase path exists but is not a directory: ${exact}`);
+    return exact;
+  }
+
+  // Existing projects may name phase directories with a human-readable suffix,
+  // such as phase-12-mobile. Reuse the only matching directory instead of
+  // creating a parallel phase-12 tree that readers would treat as another lane.
+  if (!/^\d+$/.test(value) || !existsSync(taskRoot)) return exact;
+  const prefix = `${exactName}-`;
+  const matches = readdirSync(taskRoot)
+    .filter((name) => name.startsWith(prefix) && statSync(join(taskRoot, name)).isDirectory())
+    .sort();
+  if (matches.length > 1) {
+    fail(`phase ${value} is ambiguous; matching directories: ${matches.join(', ')}`);
+  }
+  return matches.length === 1 ? join(taskRoot, matches[0]) : exact;
+}
+
 function setSection(task, name, value) {
   const updated = task.text.replace(
     new RegExp(`(## ${name}\\n\\n)[\\s\\S]*?(?=\\n## |\\n?$)`),
@@ -148,7 +176,7 @@ function cmdNewTask(args) {
   const tasks = loadTasks(cfg);
   const maxId = tasks.reduce((n, t) => Math.max(n, parseInt(t.id.slice(cfg.idPrefix.length), 10)), 0);
   const id = `${cfg.idPrefix}${String(maxId + 1).padStart(cfg.idWidth, '0')}`;
-  const dir = join(cfg.root, cfg.taskDir, `phase-${phase}`);
+  const dir = resolvePhaseDir(cfg, phase);
   mkdirSync(dir, { recursive: true });
   // A project may own its task template; its fields are the contract its
   // validators enforce, so tri's own template must not overwrite them.

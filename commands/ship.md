@@ -8,7 +8,7 @@ Load the tri-method skill first. This command runs four stages in order. Stages 
 
 Run the **tier 1, 2 and 3** preflight from the tri-method skill: worktree and branch state (stop on a dirty tree, a rebase or merge in progress, or a detached HEAD), `git fetch` so the scope is judged against the current default branch and any identifier this run allocates is not already taken, and `git ls-remote --heads origin` so no task in scope is already claimed by someone's pushed branch.
 
-In `branch-pr` workflow, **create the run branch now** — `ship/<date>-<slug>` from the default branch — so that neither the specification commit nor any implementation commit can land on the default branch. Push it immediately: the pushed branch is the claim on this scope.
+In `branch-pr` workflow, **create the run branch now** — `ship/<date>-<slug>` from the default branch — so that neither the specification commit nor any implementation commit can land on the default branch. **Push it immediately and verify the remote ref**: a failed push stops the workflow; the pushed branch is the claim on this scope.
 
 ## Stage 1 — Scope
 

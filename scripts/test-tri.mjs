@@ -313,6 +313,31 @@ check('no companion warning when the project declares none', () => {
   assert(!out.toLowerCase().includes('companion'), `unexpected companion warning:\n${out}`);
 });
 
+// --- phase directory compatibility ---
+const ws5 = mkdtempSync(join(tmpdir(), 'tri-phase-'));
+
+check('new-task reuses a suffixed phase directory from an existing task tree', () => {
+  run(ws5, ['init', '--profile', 'standard', '--yes']);
+  execFileSync('mkdir', ['-p', join(ws5, 'tri/tasks/phase-12-mobile')]);
+  const out = run(ws5, ['new-task', '--title', 'Mobile shell', '--phase', '12']);
+  assertIncludes(out, 'T-0001');
+  assert(existsSync(join(ws5, 'tri/tasks/phase-12-mobile/T-0001.md')), 'task was not written to suffixed phase directory');
+  assert(!existsSync(join(ws5, 'tri/tasks/phase-12')), 'created parallel numeric phase directory');
+});
+
+check('new-task accepts an exact phase label for new and existing directories', () => {
+  const out = run(ws5, ['new-task', '--title', 'Web shell', '--phase', '13-web']);
+  assertIncludes(out, 'T-0002');
+  assert(existsSync(join(ws5, 'tri/tasks/phase-13-web/T-0002.md')), 'exact phase label was not used');
+});
+
+check('new-task refuses an ambiguous numeric phase instead of choosing silently', () => {
+  execFileSync('mkdir', ['-p', join(ws5, 'tri/tasks/phase-14-mobile'), join(ws5, 'tri/tasks/phase-14-web')]);
+  const out = run(ws5, ['new-task', '--title', 'Ambiguous work', '--phase', '14'], true);
+  assertIncludes(out, 'ambiguous');
+  assert(!existsSync(join(ws5, 'tri/tasks/phase-14/T-0003.md')), 'ambiguous phase created a task');
+});
+
 // --- robustness: team collisions, claim ownership, run state, bad input ---
 const ws4 = mkdtempSync(join(tmpdir(), 'tri-robust-'));
 
