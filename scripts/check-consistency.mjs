@@ -32,6 +32,18 @@ for (const cmd of commands) {
   check(body.includes('tri-method'), `commands/${cmd}.md never loads the tri-method skill`);
 }
 
+// --- 2b. every mutating command declares its preflight tier ---
+// A command that writes to the repository without declaring a tier is the
+// failure this file exists to catch: the rule lands in the skill and never
+// reaches the command that must obey it.
+const READ_ONLY = new Set(['status', 'visualize', 'go']);
+for (const cmd of commands) {
+  if (READ_ONLY.has(cmd)) continue;
+  const body = read(`commands/${cmd}.md`);
+  check(/tier\s+[123]/i.test(body),
+    `commands/${cmd}.md changes the repository but declares no preflight tier`);
+}
+
 // --- 3. every config key the script reads is documented ---
 const script = read('scripts/tri.mjs');
 const configKeys = [...new Set([...script.matchAll(/\bcfg\.([a-zA-Z][a-zA-Z0-9]*)/g)].map((m) => m[1]))]

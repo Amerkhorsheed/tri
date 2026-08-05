@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.1 — 2026-08-05
+
+- `/tri:ship` kept the older two-check preflight: the 1.7.0 edit targeted
+  wording that had already changed, so the tier upgrade silently missed it.
+  The consistency check now fails when any mutating command declares no
+  preflight tier, so the same miss cannot recur.
+
 ## 1.7.0 — 2026-08-05
 
 - Preflight is now tiered and applies to **every** mutating command, not only
