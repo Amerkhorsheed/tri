@@ -29,7 +29,12 @@ function findRoot(from = process.cwd()) {
 function loadConfig() {
   const root = findRoot();
   if (!root) fail('no tri.config.json found — run `tri init` in the project root first');
-  const cfg = JSON.parse(readFileSync(join(root, 'tri.config.json'), 'utf8'));
+  let cfg;
+  try {
+    cfg = JSON.parse(readFileSync(join(root, 'tri.config.json'), 'utf8'));
+  } catch (e) {
+    fail(`tri.config.json is not valid JSON: ${e.message}`);
+  }
   return {
     root, idPrefix: 'T-', idWidth: 4, evidenceDir: 'tri/evidence',
     statuses: STATUSES, companionFiles: [], ...cfg,
@@ -178,6 +183,7 @@ function cmdNewTask(args) {
   const file = join(dir, `${id}.md`);
   writeFileSync(file, body);
   out(`created ${id} (${title}) at ${file}`);
+  out(`  id allocated from the local tree — pull before pushing; another developer creating a task from the same base gets the same id`);
   if (cfg.taskTemplate) out(`  template: ${cfg.taskTemplate} — fill every field the project requires before claiming`);
   if (cfg.companionFiles.length) {
     out('  companion files tri cannot update for you — update them in the same change:');
@@ -267,9 +273,14 @@ function cmdClaim(args) {
 
 function cmdRelease(args) {
   const cfg = loadConfig();
-  const id = args.find((a) => idRegex(cfg, false).test(a)) ?? fail(`usage: release ${cfg.idPrefix}NNNN`);
+  const id = args.find((a) => idRegex(cfg, false).test(a)) ?? fail(`usage: release ${cfg.idPrefix}NNNN [--by <name>]`);
   const t = byId(loadTasks(cfg)).get(id) ?? fail(`${id} not found`);
   if (t.status !== 'In Progress') fail(`${id} is not In Progress`);
+  // Releasing is as consequential as claiming: it drops someone else's work in progress.
+  const by = argValue(args, '--by');
+  if (by && t.assignee !== 'N/A' && t.assignee !== by && !args.includes('--force')) {
+    fail(`${id} is claimed by ${t.assignee}, not ${by}; use --force to release it anyway`);
+  }
   setSection(t, 'Status', 'Planned');
   setSection(parseTask(t.file, cfg), 'Assignee', 'N/A');
   out(`${id} released back to Planned`);
@@ -471,6 +482,54 @@ f.oninput=()=>render(f.value);render('');
 </script></body></html>`;
 }
 
+function runStatePath(cfg) { return join(cfg.root, '.tri', 'run.json'); }
+
+function cmdRunState(args) {
+  const cfg = loadConfig();
+  const p = runStatePath(cfg);
+  const load = () => (existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : null);
+  const save = (s) => { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, JSON.stringify(s, null, 2) + '\n'); };
+
+  const scope = argValue(args, '--start');
+  if (scope !== undefined) {
+    const queue = (argValue(args, '--queue') ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+    if (!queue.length) fail('--queue <ID,ID,...> required with --start');
+    const state = {
+      scope, mode: argValue(args, '--mode') ?? 'sequential',
+      queue, done: [], blocked: [], startedAt: new Date().toISOString(), finishedAt: null,
+    };
+    save(state);
+    out(`run started: ${scope} (${state.mode}), ${queue.length} queued — ${queue.join(', ')}`);
+    return;
+  }
+
+  const state = load();
+  for (const [flag, key] of [['--done', 'done'], ['--blocked', 'blocked']]) {
+    const id = argValue(args, flag);
+    if (id === undefined) continue;
+    if (!state) fail('no active run — start one with --start');
+    if (!state[key].includes(id)) state[key].push(id);
+    save(state);
+    out(`${id} recorded as ${key}; ${state.queue.filter((q) => !state.done.includes(q) && !state.blocked.includes(q)).length} remaining`);
+    return;
+  }
+
+  if (args.includes('--finish')) {
+    if (!state) fail('no active run to finish');
+    state.finishedAt = new Date().toISOString();
+    save(state);
+    out(`run finished: ${state.done.length} done, ${state.blocked.length} blocked, ${state.queue.length - state.done.length - state.blocked.length} not reached`);
+    return;
+  }
+
+  if (!state || state.finishedAt) { out('no active run'); return; }
+  const remaining = state.queue.filter((q) => !state.done.includes(q) && !state.blocked.includes(q));
+  out(`run: ${state.scope} (${state.mode}), started ${state.startedAt}`);
+  out(`  done: ${state.done.join(', ') || 'none'}`);
+  out(`  blocked: ${state.blocked.join(', ') || 'none'}`);
+  out(`  remaining: ${remaining.join(', ') || 'none'}`);
+}
+
 // ---------- arg helpers ----------
 function argValue(args, flag) {
   const i = args.indexOf(flag);
@@ -487,7 +546,7 @@ const [cmd, ...args] = process.argv.slice(2);
 const commands = {
   init: cmdInit, 'new-task': cmdNewTask, validate: cmdValidate, next: cmdNext,
   claim: cmdClaim, release: cmdRelease, done: cmdDone, status: cmdStatus, graph: cmdGraph,
-  visualize: cmdVisualize,
+  visualize: cmdVisualize, 'run-state': cmdRunState,
 };
 if (!cmd || !(cmd in commands)) {
   fail(`usage: tri.mjs <${Object.keys(commands).join('|')}> [args]
@@ -495,6 +554,7 @@ if (!cmd || !(cmd in commands)) {
   new-task --title "..." [--phase NN] [--dep T-NNNN]...
   claim T-NNNN --by <name> [--force]     (dynamic pull-based claiming; advisory, warns but never blocks on deps)
   release T-NNNN | done T-NNNN | next | status | graph | validate
-  visualize [--out path]                 (self-contained HTML board, default .tri/graph.html)`);
+  visualize [--out path]                 (self-contained HTML board, default .tri/graph.html)
+  run-state [--start <scope> --queue <ID,..> [--mode m]] [--done ID] [--blocked ID] [--finish]`);
 }
 commands[cmd](args);

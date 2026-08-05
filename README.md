@@ -56,7 +56,7 @@ Full walkthrough with commands, batch runs, and profiles: [docs/guide.html](docs
 Direct script use (what agents and CI run):
 
 ```bash
-node scripts/tri.mjs <init|new-task|validate|next|claim|release|done|status|graph|visualize>
+node scripts/tri.mjs <init|new-task|validate|next|claim|release|done|status|graph|visualize|run-state>
 ```
 
 ## Branch and PR workflows
@@ -70,6 +70,10 @@ Like GSD's execute-phase or spec-kit's implement, `/tri:run` chews through many 
 ## Parallel developers
 
 Claiming is **dynamic and pull-based** — no pre-assigned ranges. Claim when you start, claim more when you finish; a fast day means more claims, and adding tasks mid-flight is normal (`new-task`). Consistency comes from git: a claim is a commit; simultaneous claims resolve at push (first wins, second picks the next ready task). Dependency warnings on claims are advisory — the tool never blocks a split you chose deliberately.
+
+## Batch state and recovery
+
+`run-state` is the mechanical record of a batch: `--start` with a scope, mode and queue; `--done`/`--blocked` after each task; `--finish` at the end. Bare `run-state` prints what remains, so a session killed mid-batch resumes exactly where it stopped rather than relying on the agent having remembered. The file lives in gitignored `.tri/` and is never hand-edited.
 
 ## Profiles
 
@@ -107,4 +111,4 @@ node scripts/test-tri.mjs && node scripts/check-consistency.mjs
 
 The consistency check fails when a change reaches one artifact but not its companions — an undocumented command or config key, a version without a changelog entry, a stale test count, a broken link. See [CONTRIBUTING.md](CONTRIBUTING.md) for what must move together.
 
-32 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, and graph metrics.
+38 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, and graph metrics.

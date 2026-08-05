@@ -313,5 +313,65 @@ check('no companion warning when the project declares none', () => {
   assert(!out.toLowerCase().includes('companion'), `unexpected companion warning:\n${out}`);
 });
 
+// --- robustness: team collisions, claim ownership, run state, bad input ---
+const ws4 = mkdtempSync(join(tmpdir(), 'tri-robust-'));
+
+check('malformed config fails with a readable message, not a stack trace', () => {
+  writeFileSync(join(ws4, 'tri.config.json'), '{not json');
+  const out = run(ws4, ['status'], true);
+  assertIncludes(out, 'tri.config.json');
+  assert(!out.includes('at JSON.parse'), `leaked a stack trace:\n${out}`);
+});
+
+check('new-task warns that IDs are allocated from the local tree only', () => {
+  writeFileSync(join(ws4, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks' }));
+  const out = run(ws4, ['new-task', '--title', 'First', '--phase', '01']);
+  assertIncludes(out, 'T-0001');
+  assert(/pull|local tree|another developer/i.test(out),
+    `no collision warning in output:\n${out}`);
+});
+
+check('release refuses to take another developer\'s claim without --force', () => {
+  run(ws4, ['claim', 'T-0001', '--by', 'dev-a']);
+  const refused = run(ws4, ['release', 'T-0001', '--by', 'dev-b'], true);
+  assertIncludes(refused, 'dev-a');
+  const forced = run(ws4, ['release', 'T-0001', '--by', 'dev-b', '--force']);
+  assertIncludes(forced, 'released');
+});
+
+check('release by the holder needs no force', () => {
+  run(ws4, ['claim', 'T-0001', '--by', 'dev-a']);
+  const out = run(ws4, ['release', 'T-0001', '--by', 'dev-a']);
+  assertIncludes(out, 'released');
+});
+
+check('run-state records a batch and survives to be resumed', () => {
+  run(ws4, ['new-task', '--title', 'Second', '--phase', '01']);
+  run(ws4, ['new-task', '--title', 'Third', '--phase', '01']);
+  const started = run(ws4, ['run-state', '--start', 'phase 01', '--mode', 'sequential', '--queue', 'T-0001,T-0002,T-0003']);
+  assertIncludes(started, 'T-0001');
+  const state = JSON.parse(readFileSync(join(ws4, '.tri/run.json'), 'utf8'));
+  assert(state.queue.length === 3, `queue not recorded: ${JSON.stringify(state)}`);
+  assert(state.scope === 'phase 01' && state.mode === 'sequential', 'scope/mode not recorded');
+
+  run(ws4, ['run-state', '--done', 'T-0001']);
+  run(ws4, ['run-state', '--blocked', 'T-0002']);
+  const resumed = run(ws4, ['run-state']);
+  assertIncludes(resumed, 'remaining');
+  assertIncludes(resumed, 'T-0003');
+  const s2 = JSON.parse(readFileSync(join(ws4, '.tri/run.json'), 'utf8'));
+  assert(s2.done.includes('T-0001'), 'done not recorded');
+  assert(s2.blocked.includes('T-0002'), 'blocked not recorded');
+
+  run(ws4, ['run-state', '--finish']);
+  const after = run(ws4, ['run-state']);
+  assert(/no active run|finished/i.test(after), `run not closed out:\n${after}`);
+});
+
+check('run-state reports no active run when none exists', () => {
+  const out = run(ws, ['run-state']);
+  assert(/no active run/i.test(out), `expected no-active-run message:\n${out}`);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.5.0 — 2026-08-05
+
+Found by adversarial probing of concurrency, recovery, and malformed input.
+
+- `run-state` command: batch progress is now recorded by the script rather than
+  by prose instruction. `--start`/`--done`/`--blocked`/`--finish`, and bare
+  `run-state` prints what remains. Recovery from a killed session no longer
+  depends on the agent having written the file correctly.
+- `release` now requires `--force` to drop a claim held by someone else, the
+  same protection `claim` already had. The asymmetry let one developer silently
+  release another's in-progress work.
+- `new-task` warns that ids come from the local tree only: two developers
+  creating a task from the same base were both silently given the same id.
+- A malformed `tri.config.json` reports the file and the parse error instead of
+  printing a raw stack trace.
+
 ## 1.4.1 — 2026-08-05
 
 - `/tri:go` routing fix: an architectural ask that is proposed rather than
