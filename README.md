@@ -67,7 +67,7 @@ Like GSD's execute-phase or spec-kit's implement, `/tri:run` chews through many 
 
 ## Parallel developers
 
-Claiming is **dynamic and pull-based** — no pre-assigned ranges. Claim when you start, claim more when you finish; a fast day means more claims, and adding tasks mid-flight is normal (`new-task`). Consistency comes from git: a claim is a commit; simultaneous claims resolve at push (first wins, second picks the next ready task). Dependency warnings on claims are advisory — the tool never blocks a split you chose deliberately.
+Claiming is **dynamic and pull-based** — no pre-assigned ranges. Claim when you start, claim more when you finish; a fast day means more claims, and adding tasks mid-flight is normal (`new-task`). Every claim also writes `.tri/claims/<task-id>.json` with owner, primary/covered/may-cover tasks, responsibilities, and related ADRs. TRI refuses exact scope overlap and never treats branch names as ownership evidence. A pushed manifest plus verified remote ref is the visible branch-pr claim; missing or malformed scope fails closed. Consistency comes from git: simultaneous claims resolve at push (first wins, second picks the next ready task). Dependency warnings on claims are advisory — the tool never blocks a split you chose deliberately.
 
 ## Commands continue, they don't hand off
 
@@ -109,7 +109,12 @@ tri reads foreign task formats through config instead of rewriting files. Exampl
   "statuses": ["Planned", "Ready", "Blocked", "In Progress", "Done"],
   "evidenceDir": "docs/testing/evidence",
   "taskTemplate": "tasks/TASK_TEMPLATE.md",
-  "companionFiles": ["tasks/README.md", "tasks/validate-tasks.mjs"]
+  "companionFiles": ["tasks/README.md", "tasks/validate-tasks.mjs"],
+  "claimScope": {
+    "directory": ".tri/claims",
+    "responsibilities": ["mobile-runtime", "admin"]
+  },
+  "baseBranch": "dev"
 }
 ```
 
@@ -127,4 +132,4 @@ node scripts/test-tri.mjs && node scripts/check-consistency.mjs
 
 The consistency check fails when a change reaches one artifact but not its companions — an undocumented command or config key, a version without a changelog entry, a stale test count, a broken link. See [CONTRIBUTING.md](CONTRIBUTING.md) for what must move together.
 
-42 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, phase directory compatibility and conflict refusal, and graph metrics.
+44 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, phase directory compatibility and conflict refusal, and graph metrics.
