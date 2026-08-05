@@ -128,17 +128,11 @@ function cmdInit(args) {
     if (!existsSync(join(root, dst))) writeFileSync(join(root, dst), readFileSync(join(TEMPLATES, src), 'utf8'));
   }
   // AGENTS.md section for cross-agent (Claude Code / Codex) parity
-  const section = readFileSync(join(TEMPLATES, 'AGENTS-section.md'), 'utf8')
-    .replaceAll('{{TRI_SCRIPTS}}', relScripts(root));
+  const section = readFileSync(join(TEMPLATES, 'AGENTS-section.md'), 'utf8');
   const agents = join(root, 'AGENTS.md');
   if (!existsSync(agents)) writeFileSync(agents, section);
   else if (!readFileSync(agents, 'utf8').includes('## TRI Method')) appendFileSync(agents, '\n' + section);
   out(`initialized tri workspace (profile: ${profile}) at ${root}`);
-}
-
-function relScripts(root) {
-  // Prefer a stable invocation path; plugin installs keep scripts beside this file.
-  return SCRIPT_DIR.startsWith(root) ? SCRIPT_DIR.slice(root.length + 1) : SCRIPT_DIR;
 }
 
 function cmdNewTask(args) {

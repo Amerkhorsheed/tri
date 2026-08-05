@@ -1,0 +1,11 @@
+{
+  "name": "tri",
+  "owner": { "name": "Amer Khorsheed" },
+  "plugins": [
+    {
+      "name": "tri",
+      "source": "./",
+      "description": "TRI delivery method: task register, decision/assumption registers, ADRs, dynamic claiming for parallel devs, evidence-gated done, batch runs."
+    }
+  ]
+}

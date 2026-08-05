@@ -6,15 +6,26 @@ State is plain markdown under `tri/` in your project, merged through git. No ser
 
 ## Install
 
-Claude Code (as a plugin):
+**Standard setup (every developer, once):**
 
 ```bash
-claude --plugin-dir /path/to/tri
+git clone git@github.com:Amerkhorsheed/tri.git ~/.tri
 ```
 
-or add the repo to your plugin marketplace and install `tri`.
+Claude Code — register the marketplace and install:
 
-Codex / any other agent: works through the project's `AGENTS.md` — `/tri:init` appends a "TRI Method" section that instructs any agent to follow the same loop and run the same script. No Claude-specific machinery required.
+```bash
+claude plugin marketplace add Amerkhorsheed/tri
+claude plugin install tri@tri
+```
+
+(or ad hoc: `claude --plugin-dir ~/.tri`)
+
+The `~/.tri` clone is the shared convention: project docs and AGENTS.md sections reference `node ~/.tri/scripts/tri.mjs`, so every developer and CI job resolves the same path. Update with `git -C ~/.tri pull`.
+
+Codex / any other agent: works through the project's `AGENTS.md` — `/tri:init` appends a "TRI Method" section that instructs any agent to follow the same loop and run the same script from `~/.tri`. No Claude-specific machinery required.
+
+**Per project:** new project → `/tri:init [profile]`. Existing task tree → write a `tri.config.json` adapter (see "Adopting an existing task tree") and add the AGENTS.md section by hand or via init.
 
 ## Commands
 
