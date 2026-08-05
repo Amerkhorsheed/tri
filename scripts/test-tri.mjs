@@ -261,5 +261,25 @@ check('visualize honors --out for a custom path', () => {
   assert(existsSync(target), 'custom out path not written');
 });
 
+// --- machine-readable output for run loops ---
+check('next --json emits parseable frontier with deps and phase', () => {
+  const out = run(ws2, ['next', '--json']);
+  const arr = JSON.parse(out);
+  assert(Array.isArray(arr) && arr.length > 0, 'expected non-empty array');
+  const t = arr[0];
+  for (const k of ['id', 'title', 'status', 'phase', 'priority', 'deps', 'file']) {
+    assert(k in t, `frontier entry missing "${k}": ${JSON.stringify(t)}`);
+  }
+});
+
+check('status --json emits counts, ready, inProgress, blocked', () => {
+  const out = run(ws2, ['status', '--json']);
+  const s = JSON.parse(out);
+  for (const k of ['counts', 'ready', 'inProgress', 'blocked']) {
+    assert(k in s, `status json missing "${k}"`);
+  }
+  assert(typeof s.counts.Done === 'number', 'counts.Done not a number');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

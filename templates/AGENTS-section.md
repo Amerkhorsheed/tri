@@ -14,4 +14,6 @@ This project uses the TRI delivery method (task register + decision registers + 
 
 New work discovered mid-task: create it with `node {{TRI_SCRIPTS}}/tri.mjs new-task --title "..." --phase NN [--dep ID]`, don't fold it into the current task.
 
+Batch mode: an agent may execute several tasks in one run. Loop step 1-9 per task without pausing between tasks; track progress in `.tri/run.json` ({scope, mode, queue, done, blocked}); a task needing an owner decision gets a B- entry and Blocked status while the run continues with other runnable tasks; halt only on a red gate after a real fix attempt or when nothing runnable remains. `next --json` and `status --json` provide machine-readable state.
+
 Stop and report instead of proceeding when: a dependency is not actually met, an owner decision is missing, the task would require weakening a validation gate, or scope exceeds the task.

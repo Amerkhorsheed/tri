@@ -27,6 +27,7 @@ Codex / any other agent: works through the project's `AGENTS.md` — `/tri:init`
 | `/tri:status` | Counts, claims, ready frontier, critical path |
 | `/tri:decide <text>` | Append a D- (resolved) or B- (blocking) entry to the decision register |
 | `/tri:adr <text>` | Write an ADR from the template |
+| `/tri:run [scope]` | Autonomous batch execution — asks scope (phase/N/until-blocked) and mode (sequential/parallel subagents) once, then runs task after task through the gates without checkpoints; resumable via `.tri/run.json` |
 | `/tri:grill <target>` | Stress-test a task/phase/plan — one question at a time, answers captured into registers and task files |
 | `/tri:clarify [target]` | Discuss upcoming work, refine ambiguous requirements, write clarifications back into task files |
 | `/tri:visualize [target]` | Interactive HTML board (phase lanes, dependencies, critical path) written to gitignored `.tri/`, opened for discussion |
@@ -36,6 +37,10 @@ Direct script use (what agents and CI run):
 ```bash
 node scripts/tri.mjs <init|new-task|validate|next|claim|release|done|status|graph|visualize>
 ```
+
+## Batch execution vs the gates
+
+Like GSD's execute-phase or spec-kit's implement, `/tri:run` chews through many tasks in one go — but the loop's safety is mechanical, not vigilance-based: a task can't pass `done` with empty Evidence, `validate` failure halts the run, and a missing owner decision becomes a Blocked task plus register entry while the run continues elsewhere. Speed comes from never pausing between good tasks; safety from being unable to coast past a bad one.
 
 ## Parallel developers
 
@@ -71,4 +76,4 @@ Drop that in as `tri.config.json` and every command works against the existing t
 node scripts/test-tri.mjs
 ```
 
-27 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, and graph metrics.
+29 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, and graph metrics.

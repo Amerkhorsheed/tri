@@ -200,11 +200,20 @@ function cmdValidate() {
   out(`valid: ${tasks.length} tasks, ${warnings.length} warning(s)`);
 }
 
-function cmdNext() {
+function taskJson(t) {
+  return {
+    id: t.id, title: t.title, status: t.status, assignee: t.assignee,
+    priority: t.priority, deps: t.deps, phase: basename(dirname(t.file)).replace(/^phase-/, ''),
+    file: t.file,
+  };
+}
+
+function cmdNext(args = []) {
   const cfg = loadConfig();
   const tasks = loadTasks(cfg);
   const ready = readyTasks(tasks, byId(tasks))
     .sort((a, b) => a.priority.localeCompare(b.priority) || a.id.localeCompare(b.id));
+  if (args.includes('--json')) { out(JSON.stringify(ready.map(taskJson), null, 2)); return; }
   if (!ready.length) { out('no ready tasks'); return; }
   for (const t of ready) out(`${t.id} [${t.priority}] ${t.title}`);
 }
@@ -260,13 +269,22 @@ function cmdDone(args) {
   out(`${id} marked Done`);
 }
 
-function cmdStatus() {
+function cmdStatus(args = []) {
   const cfg = loadConfig();
   const tasks = loadTasks(cfg);
   const map = byId(tasks);
   const counts = {};
-  for (const s of STATUSES) counts[s] = tasks.filter((t) => t.status === s).length;
-  out(STATUSES.map((s) => `${s}: ${counts[s]}`).join('  '));
+  for (const s of cfg.statuses) counts[s] = tasks.filter((t) => t.status === s).length;
+  if (args.includes('--json')) {
+    out(JSON.stringify({
+      counts,
+      ready: readyTasks(tasks, map).map(taskJson),
+      inProgress: tasks.filter((t) => t.status === 'In Progress').map(taskJson),
+      blocked: tasks.filter((t) => t.status === 'Blocked').map(taskJson),
+    }, null, 2));
+    return;
+  }
+  out(cfg.statuses.map((s) => `${s}: ${counts[s]}`).join('  '));
   const inprog = tasks.filter((t) => t.status === 'In Progress');
   if (inprog.length) {
     out('\nin progress:');

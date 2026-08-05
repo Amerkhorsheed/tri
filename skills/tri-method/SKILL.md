@@ -30,6 +30,12 @@ Claiming is pull-based and dynamic: claim when you start, claim more when you fi
 - Cross-cutting files (API contracts, shared schemas) get changed in their own small PR reviewed by the other dev *before* dependent implementation. Everything else merges on green `validate` + project tests.
 - Registers (DECISIONS/ASSUMPTIONS) are append-only; merge conflicts resolve by keeping both entries.
 
+## Batch runs (/tri:run)
+
+Autonomous multi-task execution. Scope and mode are chosen interactively at start; the loop then runs without human checkpoints — the gates are the brakes. State lives in `.tri/run.json` (local scratch, survives restarts): `{scope, mode, queue, done, blocked, startedAt}`; update it after every task.
+
+Mid-run rules: never ask the user between tasks. A task needing an owner decision or clarification gets its B-/register entry, goes Blocked, and the run continues with other runnable tasks; questions batch to the end. Halt outright only for a red gate after a real fix attempt, or an empty runnable set. Machine-readable feeds: `next --json`, `status --json`.
+
 ## Decisions and ADRs
 
 - Choice you're not authorized to make → `B-` entry in DECISIONS.md, task goes Blocked. Owner resolves with a `D-` entry.
