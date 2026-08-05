@@ -29,12 +29,12 @@ Codex / any other agent: works through the project's `AGENTS.md` — `/tri:init`
 | `/tri:adr <text>` | Write an ADR from the template |
 | `/tri:grill <target>` | Stress-test a task/phase/plan — one question at a time, answers captured into registers and task files |
 | `/tri:clarify [target]` | Discuss upcoming work, refine ambiguous requirements, write clarifications back into task files |
-| `/tri:visualize [target]` | In-chat visualization of the graph/phase/frontier for discussion (never writes diagram files into the repo) |
+| `/tri:visualize [target]` | Interactive HTML board (phase lanes, dependencies, critical path) written to gitignored `.tri/`, opened for discussion |
 
 Direct script use (what agents and CI run):
 
 ```bash
-node scripts/tri.mjs <init|new-task|validate|next|claim|release|done|status|graph>
+node scripts/tri.mjs <init|new-task|validate|next|claim|release|done|status|graph|visualize>
 ```
 
 ## Parallel developers
@@ -71,4 +71,4 @@ Drop that in as `tri.config.json` and every command works against the existing t
 node scripts/test-tri.mjs
 ```
 
-24 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, and graph metrics.
+27 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, and graph metrics.

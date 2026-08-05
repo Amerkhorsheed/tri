@@ -236,5 +236,30 @@ check('adapter: new-task allocates IDs with the configured prefix', () => {
   assertIncludes(out, 'TASK-0012');
 });
 
+// --- visualize ---
+check('visualize writes a self-contained HTML board to .tri/', () => {
+  const out = run(ws2, ['visualize']);
+  assertIncludes(out, '.tri/graph.html');
+  const html = readFileSync(join(ws2, '.tri/graph.html'), 'utf8');
+  assertIncludes(html, '<html');
+  assertIncludes(html, 'TASK-0002');            // task data embedded
+  assertIncludes(html, 'Build importer');       // titles embedded
+  assert(!/src=["']https?:|href=["']https?:/.test(html), 'must be self-contained: no external scripts/styles');
+});
+
+check('visualize escapes hostile task titles (no XSS via task data)', () => {
+  run(ws2, ['new-task', '--title', '</script><img src=x onerror=alert(1)>', '--phase', '00']);
+  run(ws2, ['visualize']);
+  const html = readFileSync(join(ws2, '.tri/graph.html'), 'utf8');
+  assert(!html.includes('</script><img'), 'raw </script> breakout present in embedded JSON');
+  assert(!/onerror=alert/.test(html) || html.includes('\\u003c'), 'hostile markup not neutralized');
+});
+
+check('visualize honors --out for a custom path', () => {
+  const target = join(ws2, 'custom-board.html');
+  run(ws2, ['visualize', '--out', target]);
+  assert(existsSync(target), 'custom out path not written');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

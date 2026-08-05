@@ -322,6 +322,113 @@ function cmdGraph() {
   out(`ideal parallel waves: ${waves.length} (${waves.join(', ')})`);
 }
 
+function cmdVisualize(args) {
+  const cfg = loadConfig();
+  const tasks = loadTasks(cfg);
+  const map = byId(tasks);
+  // critical path over remaining tasks (same walk as cmdGraph)
+  const depth = new Map(); const via = new Map();
+  function d(id) {
+    if (depth.has(id)) return depth.get(id);
+    const t = map.get(id);
+    if (!t || t.status === 'Done') return 0;
+    depth.set(id, 0);
+    let best = 0; let b = null;
+    for (const dep of t.deps) { const v = d(dep); if (v > best) { best = v; b = dep; } }
+    depth.set(id, best + 1); via.set(id, b);
+    return best + 1;
+  }
+  let deepest = null;
+  for (const t of tasks) if (t.status !== 'Done' && d(t.id) > (deepest ? depth.get(deepest) : 0)) deepest = t.id;
+  const critical = [];
+  for (let id = deepest; id; id = via.get(id)) critical.unshift(id);
+  const ready = new Set(readyTasks(tasks, map).map((t) => t.id));
+  const phaseOf = (t) => basename(dirname(t.file)).replace(/^phase-/, '');
+  const data = tasks.map((t) => ({
+    id: t.id, title: t.title, status: t.status, assignee: t.assignee,
+    priority: t.priority, deps: t.deps, phase: phaseOf(t),
+    ready: ready.has(t.id), critical: critical.includes(t.id),
+  }));
+  const html = boardHtml(data, critical, cfg);
+  const outPath = argValue(args, '--out') ?? join(cfg.root, '.tri', 'graph.html');
+  mkdirSync(dirname(outPath), { recursive: true });
+  writeFileSync(outPath, html);
+  out(`board written to ${outPath.startsWith(cfg.root) ? outPath.slice(cfg.root.length + 1) : outPath}`);
+  out('keep .tri/ out of version control (add ".tri/" to .gitignore if not present)');
+}
+
+function boardHtml(data, critical, cfg) {
+  const counts = {};
+  for (const s of cfg.statuses) counts[s] = data.filter((t) => t.status === s).length;
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tri board</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1c2733;--mut:#68778a;--line:#dde3ea;
+--planned:#8a97a6;--ready:#1273e6;--inprog:#e6900f;--blocked:#c93a3a;--done:#2e9e5b;--crit:#7b2ff2}
+@media(prefers-color-scheme:dark){:root{--bg:#12161b;--card:#1b222b;--ink:#e8edf2;--mut:#8b98a7;--line:#2a3340}}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;gap:18px;align-items:baseline;flex-wrap:wrap}
+h1{font-size:16px;margin:0}.stat{color:var(--mut)}.stat b{color:var(--ink)}
+#f{margin-left:auto;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);min-width:220px}
+main{display:flex;gap:14px;overflow-x:auto;padding:16px 20px;align-items:flex-start}
+.lane{min-width:230px;max-width:230px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px}
+.lane h2{font-size:12px;margin:0 0 8px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+.chip{border:1px solid var(--line);border-left:4px solid var(--planned);border-radius:8px;padding:7px 9px;margin:6px 0;cursor:pointer;background:var(--bg)}
+.chip:hover{filter:brightness(1.06)}.chip .id{font-weight:600;font-size:12px}.chip .t{color:var(--mut);font-size:12px}
+.chip .who{font-size:11px;color:var(--inprog)}
+.s-Ready,.s-Planned.ready{border-left-color:var(--ready)}
+.s-InProgress{border-left-color:var(--inprog)}.s-Blocked{border-left-color:var(--blocked)}
+.s-Done{border-left-color:var(--done);opacity:.55}
+.crit{outline:2px dashed var(--crit);outline-offset:1px}
+#panel{position:fixed;right:0;top:0;bottom:0;width:340px;background:var(--card);border-left:1px solid var(--line);
+padding:18px;overflow:auto;transform:translateX(100%);transition:transform .18s}
+#panel.open{transform:none}#panel h3{margin:0 0 4px}#panel .mut{color:var(--mut)}
+#panel a{color:var(--ready);cursor:pointer;text-decoration:none}#panel button{float:right;border:0;background:none;color:var(--mut);font-size:18px;cursor:pointer}
+.legend{display:flex;gap:12px;padding:0 20px 12px;color:var(--mut);font-size:12px;flex-wrap:wrap}
+.dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+</style></head><body>
+<header><h1>tri board</h1>
+${cfg.statuses.map((s) => `<span class="stat">${s}: <b>${counts[s] ?? 0}</b></span>`).join('')}
+<span class="stat">critical path: <b>${critical.length}</b></span>
+<input id="f" placeholder="filter id / title / assignee…"></header>
+<div class="legend">
+<span><span class="dot" style="background:var(--ready)"></span>ready</span>
+<span><span class="dot" style="background:var(--inprog)"></span>in progress</span>
+<span><span class="dot" style="background:var(--blocked)"></span>blocked</span>
+<span><span class="dot" style="background:var(--done)"></span>done</span>
+<span><span class="dot" style="border:2px dashed var(--crit);background:none"></span>critical path</span></div>
+<main id="board"></main>
+<aside id="panel"></aside>
+<script>
+const DATA=${JSON.stringify(data).replace(/</g, '\\u003c')};
+const byId=Object.fromEntries(DATA.map(t=>[t.id,t]));
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const board=document.getElementById('board'),panel=document.getElementById('panel'),f=document.getElementById('f');
+function render(q){q=(q||'').toLowerCase();board.innerHTML='';
+const phases=[...new Set(DATA.map(t=>t.phase))].sort();
+for(const p of phases){const items=DATA.filter(t=>t.phase===p&&(!q||(t.id+' '+t.title+' '+t.assignee).toLowerCase().includes(q)));
+if(!items.length)continue;
+const lane=document.createElement('div');lane.className='lane';
+lane.innerHTML='<h2>phase '+p+' · '+items.filter(t=>t.status==='Done').length+'/'+items.length+'</h2>';
+for(const t of items){const c=document.createElement('div');
+c.className='chip s-'+t.status.replace(' ','')+(t.ready?' ready':'')+(t.critical?' crit':'');
+c.innerHTML='<div class="id">'+esc(t.id)+' <span class="t">'+esc(t.priority)+'</span></div><div class="t">'+esc(t.title)+'</div>'+
+(t.assignee&&t.assignee!=='N/A'?'<div class="who">'+esc(t.assignee)+'</div>':'');
+c.onclick=()=>show(t.id);lane.appendChild(c)}
+board.appendChild(lane)}}
+function show(id){const t=byId[id];if(!t)return;
+const dependants=DATA.filter(x=>x.deps.includes(id)).map(x=>x.id);
+panel.className='open';panel.innerHTML='<button onclick="panel.className=\\'\\'">×</button>'+
+'<h3>'+esc(t.id)+'</h3><div>'+esc(t.title)+'</div>'+
+'<p class="mut">status: '+esc(t.status)+(t.ready?' (ready)':'')+' · '+esc(t.priority)+' · phase '+esc(t.phase)+
+(t.assignee!=='N/A'?' · '+esc(t.assignee):'')+(t.critical?' · on critical path':'')+'</p>'+
+'<p><b>depends on</b><br>'+(t.deps.length?t.deps.map(d=>'<a onclick="show(\\''+esc(d)+'\\')">'+esc(d)+'</a> <span class="mut">'+esc(byId[d]?byId[d].status:'?')+'</span>').join('<br>'):'—')+'</p>'+
+'<p><b>unblocks</b><br>'+(dependants.length?dependants.map(d=>'<a onclick="show(\\''+esc(d)+'\\')">'+esc(d)+'</a>').join('<br>'):'—')+'</p>'}
+f.oninput=()=>render(f.value);render('');
+</script></body></html>`;
+}
+
 // ---------- arg helpers ----------
 function argValue(args, flag) {
   const i = args.indexOf(flag);
@@ -338,12 +445,14 @@ const [cmd, ...args] = process.argv.slice(2);
 const commands = {
   init: cmdInit, 'new-task': cmdNewTask, validate: cmdValidate, next: cmdNext,
   claim: cmdClaim, release: cmdRelease, done: cmdDone, status: cmdStatus, graph: cmdGraph,
+  visualize: cmdVisualize,
 };
 if (!cmd || !(cmd in commands)) {
   fail(`usage: tri.mjs <${Object.keys(commands).join('|')}> [args]
   init [--profile lite|standard|strict] [--force]
   new-task --title "..." [--phase NN] [--dep T-NNNN]...
   claim T-NNNN --by <name> [--force]     (dynamic pull-based claiming; advisory, warns but never blocks on deps)
-  release T-NNNN | done T-NNNN | next | status | graph | validate`);
+  release T-NNNN | done T-NNNN | next | status | graph | validate
+  visualize [--out path]                 (self-contained HTML board, default .tri/graph.html)`);
 }
 commands[cmd](args);
