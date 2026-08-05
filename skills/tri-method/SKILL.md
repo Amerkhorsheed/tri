@@ -32,9 +32,22 @@ Claiming is pull-based and dynamic: claim when you start, claim more when you fi
 
 ## Batch runs (/tri:run)
 
-Autonomous multi-task execution. Scope and mode are chosen interactively at start; the loop then runs without human checkpoints — the gates are the brakes. State lives in `.tri/run.json` (local scratch, survives restarts): `{scope, mode, queue, done, blocked, startedAt}`; update it after every task.
+Autonomous multi-task execution. Scope and mode are chosen interactively at start; the loop then runs without human checkpoints — the gates are the brakes. State lives in `.tri/run.json` (local scratch, survives restarts): `{scope, mode, queue, done, blocked, startedAt}`; update it after every task. In `branch-pr` workflow the loop makes one branch + PR per task (branch from the default branch each time, not from the previous task's branch); open PRs are listed in the final report, and the run reads its frontier from the default branch, never from an unmerged task branch.
 
 Mid-run rules: never ask the user between tasks. A task needing an owner decision or clarification gets its B-/register entry, goes Blocked, and the run continues with other runnable tasks; questions batch to the end. Halt outright only for a red gate after a real fix attempt, or an empty runnable set. Machine-readable feeds: `next --json`, `status --json`.
+
+## Branches and PRs
+
+`tri.config.json` sets `"workflow"`: `"trunk"` (default) or `"branch-pr"`. The script never runs git — branch/PR discipline is yours, per this section.
+
+**trunk:** work on the shared branch; the pushed claim commit is the lock.
+
+**branch-pr:** one branch per task, named `<task-id-lowercase>-<slug>` (e.g. `task-0261-endpoint-enforcement`). Rules that keep claims and status truthful:
+
+- Before claiming, check remote branches for the task ID (`git ls-remote --heads origin | grep -i <id>`); an existing branch IS a claim regardless of what the task file on your ref says.
+- The claim commit is the branch's first commit; push the branch immediately — the pushed branch is the visible lock.
+- `done` flips status inside the same branch; the PR merge lands the flip. **The frontier is only ever read from the default branch** — status on an unmerged branch is a proposal, not truth.
+- One task per branch per PR, no batching. PRs merge on green `validate` + project tests; changes touching contract/shared files wait for the other dev's review per the parallel-work rules.
 
 ## Decisions and ADRs
 

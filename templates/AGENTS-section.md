@@ -3,7 +3,7 @@
 This project uses the TRI delivery method (task register + decision registers + evidence gates). Any agent working here — Claude Code, Codex, or other — follows this loop:
 
 1. Run `node {{TRI_SCRIPTS}}/tri.mjs next` to see ready tasks; pick one (or the one you were told to do).
-2. Run `node {{TRI_SCRIPTS}}/tri.mjs claim <ID> --by <name>` before starting. Claims are dynamic and pull-based: claim when you start, not in advance; claim more whenever you finish. Commit the claim immediately so others see it.
+2. Run `node {{TRI_SCRIPTS}}/tri.mjs claim <ID> --by <name>` before starting. Claims are dynamic and pull-based: claim when you start, not in advance; claim more whenever you finish. Honor the configured workflow (tri.config.json "workflow"): trunk — commit and push the claim on the shared branch; branch-pr — check remote branches for the task ID first (an existing branch is a claim), create `<task-id-lowercase>-<slug>` from the default branch, push the claim commit immediately, one task per branch per PR, and read the frontier only from the default branch.
 3. Read the task file completely, plus every linked ADR and context document, before editing.
 4. Implement exactly that one task. No unrelated refactoring.
 5. Record consequential assumptions in `tri/ASSUMPTIONS.md`. Record decisions you are not authorized to make in `tri/DECISIONS.md` as blocking entries — never choose silently.

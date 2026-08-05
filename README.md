@@ -38,6 +38,10 @@ Direct script use (what agents and CI run):
 node scripts/tri.mjs <init|new-task|validate|next|claim|release|done|status|graph|visualize>
 ```
 
+## Branch and PR workflows
+
+`"workflow": "trunk"` (default) or `"branch-pr"` in `tri.config.json`. Trunk: pushed claim commit = the lock. Branch-pr: one branch per task (`task-0261-endpoint-enforcement`), the pushed branch is the lock (checked before claiming), `done` flips status inside the branch and becomes truth when the PR merges, and the frontier is only read from the default branch. The script itself never runs git — an autonomous bookkeeping tool that silently pushes is a failure mode, so branch/PR mechanics stay in the command/skill layer where they're visible.
+
 ## Batch execution vs the gates
 
 Like GSD's execute-phase or spec-kit's implement, `/tri:run` chews through many tasks in one go — but the loop's safety is mechanical, not vigilance-based: a task can't pass `done` with empty Evidence, `validate` failure halts the run, and a missing owner decision becomes a Blocked task plus register entry while the run continues elsewhere. Speed comes from never pausing between good tasks; safety from being unable to coast past a bad one.

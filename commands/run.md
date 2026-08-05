@@ -12,7 +12,7 @@ Load the tri-method skill first (its Batch runs section defines the state file a
 
 **4. Write state** to `.tri/run.json`: `{scope, mode, queue, done, blocked, startedAt}`. Update it after every task — the run must survive a session restart.
 
-**5. Loop.** For each task: claim (commit the claim) → read the task file fully plus linked ADRs/Skills → implement → run its required tests → fill Evidence → `validate` → `done` → commit with the task ID → update state → take the next task **without asking the user anything**.
+**5. Loop.** For each task: claim per the configured workflow (branch-pr: branch from the default branch, claim commit pushed as the branch's first commit; trunk: claim committed on the shared branch) → read the task file fully plus linked ADRs/Skills → implement → run its required tests → fill Evidence → `validate` → `done` → commit with the task ID → branch-pr: open the PR, merge on green when no contract/shared files are touched, else leave open for review and move on → update state → take the next task **without asking the user anything**. Always branch the next task from the default branch, never from the previous task's branch.
 
 **6. Stop conditions — the only reasons to pause or halt:**
 - Owner decision needed → write the B- entry, mark that task Blocked, and **continue with other independent tasks in scope**; halt only when nothing runnable remains.
