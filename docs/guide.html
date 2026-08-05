@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>How to use tri</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1c2733;--mut:#68778a;--line:#dde3ea;
+--ready:#1273e6;--inprog:#e6900f;--blocked:#c93a3a;--done:#2e9e5b;--crit:#7b2ff2}
+@media(prefers-color-scheme:dark){:root{--bg:#12161b;--card:#1b222b;--ink:#e8edf2;--mut:#8b98a7;--line:#2a3340}
+img.diagram{background:#fff;border-radius:12px;padding:8px}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.55 system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+main{max-width:880px;margin:0 auto;padding:32px 24px 80px}
+h1{font-size:26px;margin:0 0 6px}h2{font-size:19px;margin:40px 0 10px}
+.sub{color:var(--mut);margin:0 0 24px}
+section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 24px;margin:16px 0}
+code,pre{font-family:ui-monospace,Menlo,monospace;font-size:13px}
+code{background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+pre{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto}
+pre code{background:none;border:none;padding:0}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line)}th{color:var(--mut);font-weight:600}
+img.diagram{max-width:100%;height:auto;display:block;margin:8px auto}
+.pill{display:inline-block;font-size:12px;font-weight:600;border-radius:99px;padding:2px 10px;margin-right:6px}
+.p-b{background:color-mix(in srgb,var(--ready) 14%,transparent);color:var(--ready)}
+.p-o{background:color-mix(in srgb,var(--inprog) 14%,transparent);color:var(--inprog)}
+.p-g{background:color-mix(in srgb,var(--done) 14%,transparent);color:var(--done)}
+.p-r{background:color-mix(in srgb,var(--blocked) 14%,transparent);color:var(--blocked)}
+li{margin:4px 0}
+</style></head><body><main>
+<h1>How to use tri</h1>
+<p class="sub">Task register · decision registers · evidence-gated done. State is markdown in git — no server, no daemon, one zero-dependency script.</p>
+
+<section>
+<h2 style="margin-top:0">Install (once per developer)</h2>
+<pre><code>git clone git@github.com:Amerkhorsheed/tri.git ~/.tri
+claude plugin marketplace add Amerkhorsheed/tri
+claude plugin install tri@tri</code></pre>
+<p>Codex and other agents need no install — the project's <code>AGENTS.md</code> section (written by <code>/tri:init</code>) binds them to the same loop via <code>node ~/.tri/scripts/tri.mjs</code>.</p>
+<p><b>New project:</b> <code>/tri:init standard</code> &nbsp;·&nbsp; <b>Existing task tree:</b> write a <code>tri.config.json</code> adapter — files stay byte-for-byte unchanged.</p>
+</section>
+
+<section>
+<h2 style="margin-top:0">The single-task loop</h2>
+<img class="diagram" src="tri-loop.svg" alt="tri single-task loop: pick, claim, read, implement, evidence, gate, done, commit">
+<p>The two rules that make it work: <b>never choose silently</b> (owner-level choices become B- register entries, not inline defaults) and <b>done means evidenced</b> (<code>tri done</code> mechanically refuses an empty Evidence section, and <code>tri validate</code> is the merge gate).</p>
+</section>
+
+<section>
+<h2 style="margin-top:0">Parallel developers &amp; agents</h2>
+<img class="diagram" src="tri-team.svg" alt="tri parallel model: dynamic pull-based claims from a shared frontier, git as the lock">
+<p>No pre-assigned ranges. Claim when you start, claim more when you finish. In <code>branch-pr</code> workflow the pushed task branch is the visible lock; the frontier is only ever read from the default branch.</p>
+</section>
+
+<section>
+<h2 style="margin-top:0">Batch execution — /tri:run</h2>
+<ol>
+<li>Run surveys the frontier and offers real scopes: <i>until-blocked · one phase · N tasks · named tasks</i>; then sequential vs parallel subagents.</li>
+<li>Loops the single-task loop with <b>no questions between tasks</b>. State persists in <code>.tri/run.json</code> — survives session restarts.</li>
+<li>A task needing an owner decision gets its B- entry, goes Blocked, and the run <b>continues with other runnable work</b>; questions batch to the end.</li>
+<li>Halts only on: red gate after a real fix attempt, or nothing runnable left.</li>
+<li>Sequential run = one run branch, atomic commit per task, one PR per phase boundary. Parallel = per-task branches/PRs.</li>
+</ol>
+</section>
+
+<section>
+<h2 style="margin-top:0">Commands</h2>
+<table>
+<tr><th>Command</th><th>Use</th></tr>
+<tr><td><code>/tri:next</code></td><td>See ready tasks; claim and start one</td></tr>
+<tr><td><code>/tri:run</code></td><td>Autonomous batch through the gates</td></tr>
+<tr><td><code>/tri:done</code></td><td>Evidence-gated completion + PR</td></tr>
+<tr><td><code>/tri:plan</code></td><td>Spec → tasks with real dependency edges</td></tr>
+<tr><td><code>/tri:status</code> · <code>/tri:visualize</code></td><td>Counts, claims, critical path · interactive HTML board</td></tr>
+<tr><td><code>/tri:grill</code> · <code>/tri:clarify</code></td><td>Stress-test / refine requirements — answers land in files, not chat</td></tr>
+<tr><td><code>/tri:decide</code> · <code>/tri:adr</code></td><td>Register a decision · record an architecture decision</td></tr>
+</table>
+</section>
+
+<section>
+<h2 style="margin-top:0">Statuses &amp; profiles</h2>
+<p>
+<span class="pill p-b">Planned / Ready</span>
+<span class="pill p-o">In Progress = claimed</span>
+<span class="pill p-r">Blocked = waiting on a named decision</span>
+<span class="pill p-g">Done = evidenced</span>
+</p>
+<table>
+<tr><th></th><th>lite</th><th>standard</th><th>strict</th></tr>
+<tr><td>Task fields</td><td>~8</td><td>~18</td><td>~28</td></tr>
+<tr><td>Done gate</td><td>validate passes</td><td>+ Evidence filled</td><td>+ evidence record file</td></tr>
+</table>
+</section>
+</main></body></html>

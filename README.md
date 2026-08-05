@@ -27,6 +27,14 @@ Codex / any other agent: works through the project's `AGENTS.md` — `/tri:init`
 
 **Per project:** new project → `/tri:init [profile]`. Existing task tree → write a `tri.config.json` adapter (see "Adopting an existing task tree") and add the AGENTS.md section by hand or via init.
 
+## How it works, visually
+
+![The single-task loop](docs/tri-loop.svg)
+
+![Parallel work and dynamic claims](docs/tri-team.svg)
+
+Full walkthrough with commands, batch runs, and profiles: [docs/guide.html](docs/guide.html) (self-contained — open in any browser).
+
 ## Commands
 
 | Command | Does |
