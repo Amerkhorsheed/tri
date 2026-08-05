@@ -14,7 +14,7 @@ Load the tri-method skill first. This command is a router: read the workspace st
 | Unfinished `.tri/run.json` | `/tri:run` (resume) |
 | No `tri.config.json` in the project | `/tri:init` |
 | Ask describes a spec, feature, or goal with no tasks behind it yet | `/tri:plan` |
-| Ask **proposes or questions** an architectural change the user has not settled — "should we switch to X", "I'm considering Y", or anything contradicting an Accepted ADR without stating the decision as made | `/tri:grill` first. An ADR records a decision; writing one for an unsettled choice manufactures a conclusion the user never reached |
+| Ask **proposes or questions** an architectural change the user has not settled — "should we switch to X", "I'm considering Y", or anything contradicting an Accepted ADR without stating the decision as made | `/tri:clarify` first — it interrogates one question at a time for a decision. An ADR records a decision; writing one for an unsettled choice manufactures a conclusion the user never reached. Then continue: write the ADR the interrogation settles, and re-specify the tasks it affects |
 | Ask states a **settled** architectural decision — new dependency, service, boundary, changed contract | `/tri:adr` (and say plainly that implementation is blocked until it lands) |
 | Ask states a resolved choice, or names an open question nobody present can answer | Record it in the register directly — a `D-` entry if resolved, a `B-` entry plus Blocked status if not — then continue with whatever it unblocks |
 | Ask expresses doubt, risk, "is this right", "stress test", "poke holes" | `/tri:clarify` (it interrogates one question at a time when the target is a decision rather than a spec) |
@@ -32,4 +32,4 @@ Load the tri-method skill first. This command is a router: read the workspace st
 - If the named task is already claimed by someone else, stop and say so. Do not take it over.
 - Continue into the next step rather than naming it: routing to `/tri:adr` then re-specifying the tasks that ADR unblocks is one invocation, not two. Announce each hop in a line. Stop only at the gates the tri-method skill lists.
 
-**4. Report** in two or three sentences: what you read, what you chose, what happened. Then name the natural next command so the user can keep moving.
+**4. Report** in two or three sentences: what you read, what you chose, what happened, and where the chain stopped and why. Do not end by naming a command — if work remains inside the user's ask, continue into it.

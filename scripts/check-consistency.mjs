@@ -44,6 +44,14 @@ for (const cmd of commands) {
     `commands/${cmd}.md changes the repository but declares no preflight tier`);
 }
 
+// --- 2c. no command references a command that no longer exists ---
+for (const cmd of commands) {
+  const body = read(`commands/${cmd}.md`);
+  for (const m of body.matchAll(/\`?\/tri:([a-z-]+)/g)) {
+    check(commands.includes(m[1]), `commands/${cmd}.md references /tri:${m[1]}, which is not a command`);
+  }
+}
+
 // --- 3. every config key the script reads is documented ---
 const script = read('scripts/tri.mjs');
 const configKeys = [...new Set([...script.matchAll(/\bcfg\.([a-zA-Z][a-zA-Z0-9]*)/g)].map((m) => m[1]))]

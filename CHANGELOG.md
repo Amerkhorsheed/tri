@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.1 — 2026-08-05
+
+- Fixed dangling references left by the 2.0.0 removals: /tri:go still routed
+  unsettled architectural changes to the removed /tri:grill, and still ended by
+  naming a command despite the continuation rule. The consistency check now
+  fails on any reference to a command that does not exist.
+
 ## 2.0.0 — 2026-08-05
 
 Breaking: two commands removed.
