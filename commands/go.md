@@ -18,7 +18,8 @@ Load the tri-method skill first. This command is a router: read the workspace st
 | Ask states a resolved choice, or names an open question nobody present can answer | `/tri:decide` |
 | Ask expresses doubt, risk, "is this right", "stress test", "poke holes" | `/tri:grill` |
 | Target task exists but its Objective/Acceptance criteria are vague, contradictory, or its deps look ceremonial | `/tri:clarify` (do this **before** claiming — clarifying after implementation starts wastes the work) |
-| Ask implies volume: "a bunch", "keep going", "batch", "all of phase N", "overnight" | `/tri:run` |
+| Ask names a feature **area** whose tasks are not yet specified — vague objectives, templated acceptance criteria, undecided stack or boundary | `/tri:ship` (scope, interview, specify, one gate, then implement) |
+| Ask implies volume on **already-specified** tasks: "a bunch", "keep going", "batch", "all of phase N", "overnight" | `/tri:run` |
 | Ask names one ready, well-specified task or area | `/tri:next <ID>` |
 | Ask is about seeing, comparing, or understanding the shape of work | `/tri:visualize` |
 | Frontier is empty and everything runnable is Blocked | Do not route. Report the blockers with their register entries and name who must decide what. |

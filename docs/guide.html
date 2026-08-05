@@ -50,6 +50,18 @@ claude plugin install tri@tri</code></pre>
 </section>
 
 <section>
+<h2 style="margin-top:0">The whole pipeline — /tri:ship</h2>
+<p>One command from "I want to work on X" to built code, in four stages:</p>
+<ol>
+<li><b>Scope</b> — resolves your area against the real task tree, with counts and blockers.</li>
+<li><b>Interview</b> — reads every task and its ADRs, then asks only what is genuinely yours to decide, as selectable options.</li>
+<li><b>Specify</b> — writes answers into task files, decision and assumption registers, and ADRs. Commits specifications on their own.</li>
+<li><b>Implement</b> — hands off to the run loop and goes unattended.</li>
+</ol>
+<p><b>One gate, between 3 and 4, and it is deliberate.</b> Specifications land reviewable before any code exists: a wrong answer caught there costs seconds, the same answer caught after a batch run costs the batch. Everything before the gate asks you things; nothing after it does.</p>
+</section>
+
+<section>
 <h2 style="margin-top:0">Batch execution — /tri:run</h2>
 <ol>
 <li>Run surveys the frontier and offers real scopes: <i>until-blocked · one phase · N tasks · named tasks</i>; then sequential vs parallel subagents.</li>
@@ -65,6 +77,7 @@ claude plugin install tri@tri</code></pre>
 <table>
 <tr><th>Command</th><th>Use</th></tr>
 <tr><td><code>/tri:go [focus]</code></td><td><b>Start here.</b> Say what you want to work on; tri reads state, picks the right command below, runs it</td></tr>
+<tr><td><code>/tri:ship &lt;area&gt;</code></td><td>Whole pipeline: scope → interview → write specs → one go-ahead → implement unattended</td></tr>
 <tr><td><code>/tri:next</code></td><td>See ready tasks; claim and start one</td></tr>
 <tr><td><code>/tri:run</code></td><td>Autonomous batch through the gates</td></tr>
 <tr><td><code>/tri:done</code></td><td>Evidence-gated completion + PR</td></tr>

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.0 — 2026-08-05
+
+- `/tri:ship <area>`: the whole pipeline in one command — scope, interview,
+  finalize specifications, then implement. Exactly one gate, between
+  specification and implementation, because a spec error caught there costs
+  seconds and the same error caught mid-batch costs the batch. Stages before
+  the gate are interactive; stage 4 hands off to the `/tri:run` loop unattended.
+- `/tri:go` routes an unspecified feature area to `/tri:ship` and keeps
+  `/tri:run` for work that is already specified, so there is still one front door.
+
 ## 1.3.0 — 2026-08-05
 
 - `scripts/check-consistency.mjs`: fails when a change lands in one artifact but

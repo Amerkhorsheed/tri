@@ -43,6 +43,12 @@ Claiming is pull-based and dynamic: claim when you start, claim more when you fi
 - Cross-cutting files (API contracts, shared schemas) get changed in their own small PR reviewed by the other dev *before* dependent implementation. Everything else merges on green `validate` + project tests.
 - Registers (DECISIONS/ASSUMPTIONS) are append-only; merge conflicts resolve by keeping both entries.
 
+## Feature pipeline (/tri:ship)
+
+Takes an area from unclear to built in one command: scope → interview → finalize specifications → **one gate** → implement. Stages 1-3 are interactive because specification needs the user; stage 4 hands off to the `/tri:run` loop and runs unattended.
+
+The gate between specification and implementation is not optional. Specifications land as their own commit, reviewable before any code exists — a wrong spec answer caught there costs seconds, and caught after a batch run costs the whole batch. Everything before the gate asks; nothing after it does.
+
 ## Batch runs (/tri:run)
 
 Autonomous multi-task execution. Scope and mode are chosen interactively at start; the loop then runs without human checkpoints — the gates are the brakes. State lives in `.tri/run.json` (local scratch, survives restarts): `{scope, mode, queue, done, blocked, startedAt}`; update it after every task. In `branch-pr` workflow a sequential run uses ONE run branch (`run/<date>-<scope>`, first commit claims the queue, pushed immediately) with one atomic commit per task and one PR per phase boundary — tasks stack, so intra-run dependency chains work; per-task branches from the default branch would silently drop the previous task's unmerged code. Parallel subagent runs keep per-task branches/PRs. Contract/shared-file tasks are extracted to their own PR for review while the run continues. Open PRs go in the final report; the frontier is read from the default branch only.

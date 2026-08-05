@@ -40,6 +40,7 @@ Full walkthrough with commands, batch runs, and profiles: [docs/guide.html](docs
 | Command | Does |
 |---|---|
 | `/tri:go [focus]` | **Start here.** Say what you want to work on; reads state, picks the right command below, runs it |
+| `/tri:ship <area>` | Whole pipeline: scope → interview → write specs → one go-ahead → implement unattended |
 | `/tri:init [profile]` | Scaffold `tri/` workspace + `tri.config.json` + AGENTS.md section. Profiles: `lite`, `standard` (default), `strict` |
 | `/tri:plan <spec>` | Decompose a spec into tasks with real (not ceremonial) dependency edges |
 | `/tri:next [T-NNNN]` | Show ready tasks; claim and start one |
