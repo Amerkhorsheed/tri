@@ -98,23 +98,27 @@ function resolvePhaseDir(cfg, phase) {
   const taskRoot = join(cfg.root, cfg.taskDir);
   const exactName = `phase-${value}`;
   const exact = join(taskRoot, exactName);
+  const suffixMatches = /^\d+$/.test(value) && existsSync(taskRoot)
+    ? readdirSync(taskRoot)
+      .filter((name) => name.startsWith(`${exactName}-`) && statSync(join(taskRoot, name)).isDirectory())
+      .sort()
+    : [];
+
   if (existsSync(exact)) {
     if (!statSync(exact).isDirectory()) fail(`phase path exists but is not a directory: ${exact}`);
+    if (suffixMatches.length) {
+      fail(`phase ${value} is ambiguous; matching directories: ${[exactName, ...suffixMatches].join(', ')}`);
+    }
     return exact;
   }
 
   // Existing projects may name phase directories with a human-readable suffix,
   // such as phase-12-mobile. Reuse the only matching directory instead of
   // creating a parallel phase-12 tree that readers would treat as another lane.
-  if (!/^\d+$/.test(value) || !existsSync(taskRoot)) return exact;
-  const prefix = `${exactName}-`;
-  const matches = readdirSync(taskRoot)
-    .filter((name) => name.startsWith(prefix) && statSync(join(taskRoot, name)).isDirectory())
-    .sort();
-  if (matches.length > 1) {
-    fail(`phase ${value} is ambiguous; matching directories: ${matches.join(', ')}`);
+  if (suffixMatches.length > 1) {
+    fail(`phase ${value} is ambiguous; matching directories: ${suffixMatches.join(', ')}`);
   }
-  return matches.length === 1 ? join(taskRoot, matches[0]) : exact;
+  return suffixMatches.length === 1 ? join(taskRoot, suffixMatches[0]) : exact;
 }
 
 function setSection(task, name, value) {

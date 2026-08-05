@@ -338,6 +338,13 @@ check('new-task refuses an ambiguous numeric phase instead of choosing silently'
   assert(!existsSync(join(ws5, 'tri/tasks/phase-14/T-0003.md')), 'ambiguous phase created a task');
 });
 
+check('new-task refuses a numeric phase when canonical and suffixed directories coexist', () => {
+  execFileSync('mkdir', ['-p', join(ws5, 'tri/tasks/phase-15'), join(ws5, 'tri/tasks/phase-15-mobile')]);
+  const out = run(ws5, ['new-task', '--title', 'Conflicting work', '--phase', '15'], true);
+  assertIncludes(out, 'ambiguous');
+  assert(!existsSync(join(ws5, 'tri/tasks/phase-15/T-0003.md')), 'conflicting phase created a task');
+});
+
 // --- robustness: team collisions, claim ownership, run state, bad input ---
 const ws4 = mkdtempSync(join(tmpdir(), 'tri-robust-'));
 
