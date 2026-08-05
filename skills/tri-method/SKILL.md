@@ -11,16 +11,28 @@ TRI = Task register + Registers (decisions/assumptions/ADRs) + Increment evidenc
 
 All mechanics go through one script: `node <plugin>/scripts/tri.mjs` (run with no args for usage). Never hand-edit Status/Assignee fields — the script keeps them parseable.
 
-## Routing
+## Routing and continuation
 
-`/tri:go [focus]` is the entry point when the right command isn't obvious: it reads state, matches intent to exactly one command, runs it, and reports. Its rules live in the command file. Everything below is what it routes *to* — and what an experienced user invokes directly.
+`/tri:go [focus]` is the entry point when the right command isn't obvious: it reads state, matches intent to exactly one command, runs it, and continues.
+
+**Continue by default.** When a command finishes and exactly one sensible next step exists, take it — do not end by naming a command for the user to type. An ADR that lands re-specifies the tasks that were waiting on it. A clarification that resolves claims the task and starts work. A batch that empties reports and stops. Announce each continuation in one line as you take it, so the user can see the chain and interrupt it.
+
+**Stop only at a real gate.** These are the whole list:
+
+- The `/tri:ship` gate between specification and implementation.
+- A decision that is the user's or an owner's to make — record the `B-` entry, then stop or continue elsewhere per the command.
+- A red validator or failing test after a genuine fix attempt.
+- Anything irreversible or outward-facing: force-push, merging a PR that touches contracts or shared files, deleting work.
+- The user asked for one specific thing and the continuation would exceed it.
+
+Ambiguity is not a gate — resolve it with a question and keep going. Ceremony is not a gate either: never stop merely to confirm that the obvious next step is the obvious next step.
 
 ## Asking the user
 
 When a command needs a decision from the user, **present it with the structured question tool (AskUserQuestion), not as prose.** It renders selectable options, batches up to four independent questions in one turn, always allows free-text "Other", and produces an answer you can write straight into a task file or register.
 
 - Put your recommended option **first** and mark it `(Recommended)`. State the tradeoff in each option's description — the user is choosing, not guessing.
-- Batch independent decisions into one call (max four). Ask sequentially only when a later question depends on an earlier answer — `/tri:grill` is deliberately one at a time for that reason.
+- Batch independent decisions into one call (max four). Ask sequentially only when a later question depends on an earlier answer — `/tri:clarify` goes one at a time when the target is a decision, for that reason.
 - Use prose instead only when the answer is genuinely open-ended (wording an Objective, naming a thing) or when nothing is actually being decided.
 - Never ask what the repository can answer. Read the files, run the script, then ask only the decisions.
 
@@ -130,6 +142,8 @@ Mid-run rules: never ask the user between tasks. A task needing an owner decisio
 - One task per branch per PR, no batching. PRs merge on green `validate` + project tests; changes touching contract/shared files wait for the other dev's review per the parallel-work rules.
 
 ## Decisions and ADRs
+
+Writing the registers is a **capability every command has**, not a step the user invokes. Whenever a decision is resolved or blocked during any command — planning, clarifying, shipping, running, implementing — record it there and then, in the same change as the work it affects.
 
 - Choice you're not authorized to make → `B-` entry in DECISIONS.md, task goes Blocked. Owner resolves with a `D-` entry.
 - Architectural decision (new dependency, service, boundary, changed contract) → ADR in `tri/adr/` from the template, **before** implementing.

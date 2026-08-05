@@ -47,7 +47,7 @@ Run the project's validators. Commit the specifications as their own commit on t
 Report what was specified, what was decided, what is blocked and by whom, and exactly which tasks are about to be implemented. Then ask, with AskUserQuestion:
 
 - **Proceed** — implement the queue now.
-- **Review first** — stop here and open a PR for the specification commit alone. It stands on its own; the user resumes later with `/tri:ship resume` or `/tri:run`.
+- **Review first** — stop here and open a PR for the specification commit alone. It stands on its own; the user resumes later with `/tri:ship resume`.
 - **Adjust** — return to stage 2 for the tasks the user names.
 
 Do not proceed without an explicit answer. This is the only pause; make it count by reporting honestly rather than optimistically.
@@ -60,4 +60,4 @@ Stay on the stage-0 branch: implementation commits stack on top of the specifica
 
 ## Finish
 
-Report: tasks specified, tasks implemented with their commits, tasks blocked with their register entries, open PRs, questions batched during the run, and the new frontier. Name the next command.
+Report: tasks specified, tasks implemented with their commits, tasks blocked with their register entries, open PRs, questions batched during the run, and the new frontier. If the frontier still holds runnable work inside the original ask, continue into it rather than naming a command; otherwise say plainly what is blocked and who must act.

@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.0.0 — 2026-08-05
+
+Breaking: two commands removed.
+
+- **Commands continue instead of handing off.** The old rule — "route, run,
+  report, the user re-invokes" — turned every workflow into a sequence the user
+  had to remember and type. A command that finishes with exactly one sensible
+  next step now takes it, announcing each hop. It stops only at a real gate: the
+  ship specification gate, an owner decision, a red validator after a genuine
+  fix attempt, or anything irreversible. Ambiguity gets a question, not a halt.
+- **`/tri:decide` removed.** Writing register entries is a capability every
+  command already had; nobody has a reason to invoke it directly. Decisions are
+  now recorded in the command where they arise.
+- **`/tri:grill` merged into `/tri:clarify`**, which adapts depth: batched
+  questions for vague specifications, one question at a time when interrogating
+  a decision or a direction the user doubts.
+- `/tri:adr` continues into re-specifying the tasks its decision unblocks.
+
 ## 1.7.1 — 2026-08-05
 
 - `/tri:ship` kept the older two-check preflight: the 1.7.0 edit targeted

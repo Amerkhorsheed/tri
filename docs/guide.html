@@ -84,15 +84,21 @@ claude plugin install tri@tri</code></pre>
 <tr><td><code>/tri:done</code></td><td>Evidence-gated completion + PR</td></tr>
 <tr><td><code>/tri:plan</code></td><td>Spec → tasks with real dependency edges</td></tr>
 <tr><td><code>/tri:status</code> · <code>/tri:visualize</code></td><td>Counts, claims, critical path · interactive HTML board</td></tr>
-<tr><td><code>/tri:grill</code> · <code>/tri:clarify</code></td><td>Stress-test / refine requirements — answers land in files, not chat</td></tr>
-<tr><td><code>/tri:decide</code> · <code>/tri:adr</code></td><td>Register a decision · record an architecture decision</td></tr>
+<tr><td><code>/tri:clarify</code></td><td>Interrogate and refine what is unclear — batched for specs, one at a time for decisions. Answers land in files, not chat</td></tr>
+<tr><td><code>/tri:adr</code></td><td>Record an architecture decision, then re-specify what it unblocks</td></tr>
 </table>
+</section>
+
+<section>
+<h2 style="margin-top:0">Commands continue, they don't hand off</h2>
+<p>When a command finishes and exactly one sensible next step exists, it takes it — announcing each hop so you can see the chain and interrupt. An ADR that lands re-specifies the tasks waiting on it. A clarification that resolves claims the task and starts work.</p>
+<p>It stops only at a <b>real gate</b>: the ship specification gate, a decision that is yours or an owner's, a red validator after a genuine fix attempt, or anything irreversible. Ambiguity gets a question, not a halt — and it never stops just to confirm that the obvious next step is obvious.</p>
 </section>
 
 <section>
 <h2 style="margin-top:0">How tri asks you things</h2>
 <p>Every decision arrives as <b>selectable options</b>, not a wall of prose: the recommended one first and marked, each carrying its real tradeoff, up to four independent questions batched into one turn. Free-text is always available via <i>Other</i>.</p>
-<p>Two deliberate exceptions: <code>/tri:grill</code> asks strictly one question at a time, because each answer shapes the next; and genuinely open-ended answers (wording an objective, naming a thing) stay prose. tri never asks what it can read from the repository — it runs the script and the files first, then asks only what is actually yours to decide.</p>
+<p>Two deliberate exceptions: <code>/tri:clarify</code> asks one question at a time when interrogating a decision, because each answer shapes the next; and genuinely open-ended answers (wording an objective, naming a thing) stay prose. tri never asks what it can read from the repository — it runs the script and the files first, then asks only what is actually yours to decide.</p>
 </section>
 
 <section>

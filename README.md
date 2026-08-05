@@ -46,11 +46,9 @@ Full walkthrough with commands, batch runs, and profiles: [docs/guide.html](docs
 | `/tri:next [T-NNNN]` | Show ready tasks; claim and start one |
 | `/tri:done <T-NNNN>` | Evidence-gated completion |
 | `/tri:status` | Counts, claims, ready frontier, critical path |
-| `/tri:decide <text>` | Append a D- (resolved) or B- (blocking) entry to the decision register |
 | `/tri:adr <text>` | Write an ADR from the template |
 | `/tri:run [scope]` | Autonomous batch execution — asks scope (phase/N/until-blocked) and mode (sequential/parallel subagents) once, then runs task after task through the gates without checkpoints; resumable via `.tri/run.json` |
-| `/tri:grill <target>` | Stress-test a task/phase/plan — one question at a time, answers captured into registers and task files |
-| `/tri:clarify [target]` | Discuss upcoming work, refine ambiguous requirements, write clarifications back into task files |
+| `/tri:clarify [target]` | Interrogate and refine what is unclear — a task, a phase, or a decision you doubt. Batches questions for specs, goes one at a time for decisions. Writes results into files and registers |
 | `/tri:visualize [target]` | Interactive HTML board (phase lanes, dependencies, critical path) written to gitignored `.tri/`, opened for discussion |
 
 Direct script use (what agents and CI run):
@@ -70,6 +68,12 @@ Like GSD's execute-phase or spec-kit's implement, `/tri:run` chews through many 
 ## Parallel developers
 
 Claiming is **dynamic and pull-based** — no pre-assigned ranges. Claim when you start, claim more when you finish; a fast day means more claims, and adding tasks mid-flight is normal (`new-task`). Consistency comes from git: a claim is a commit; simultaneous claims resolve at push (first wins, second picks the next ready task). Dependency warnings on claims are advisory — the tool never blocks a split you chose deliberately.
+
+## Commands continue, they don't hand off
+
+A command that finishes with exactly one sensible next step takes it, announcing each hop in a line. An ADR that lands re-specifies the tasks waiting on it; a clarification that resolves claims the task and starts. It stops only at a real gate: the `/tri:ship` specification gate, a decision that is the owner's, a red validator after a genuine fix attempt, or anything irreversible. Ambiguity is resolved with a question, not a halt.
+
+Writing decision and assumption entries is a capability every command has, not something you invoke — which is why there is no `decide` command.
 
 ## Before work starts
 
