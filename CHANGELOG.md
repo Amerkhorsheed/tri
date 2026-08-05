@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.0 — 2026-08-05
+
+- `taskTemplate` config: when a project owns its task template, `new-task` uses
+  it instead of tri's. A project's fields are the contract its own validators
+  enforce; writing tri's template into such a repo produced files that failed
+  those validators on creation.
+- `companionFiles` config: `new-task` names the files it cannot update itself
+  (task indexes, pinned inventory counts) instead of silently leaving them
+  stale. Pinned counts are a deliberate anti-drift control in some repos, so
+  tri reports rather than edits them.
+
 ## 1.1.0 — 2026-08-05
 
 - Structured questions are now the default way every command asks for a decision.

@@ -281,5 +281,37 @@ check('status --json emits counts, ready, inProgress, blocked', () => {
   assert(typeof s.counts.Done === 'number', 'counts.Done not a number');
 });
 
+// --- project-owned task template and companion files ---
+const ws3 = mkdtempSync(join(tmpdir(), 'tri-tpl-'));
+
+check('new-task uses the project template when taskTemplate is configured', () => {
+  writeFileSync(join(ws3, 'tri.config.json'), JSON.stringify({
+    profile: 'standard', taskDir: 'tasks', idPrefix: 'TASK-', idWidth: 4,
+    taskTemplate: 'tasks/TASK_TEMPLATE.md',
+    companionFiles: ['tasks/README.md', 'tasks/validate-tasks.mjs'],
+  }));
+  execFileSync('mkdir', ['-p', join(ws3, 'tasks')]);
+  writeFileSync(join(ws3, 'tasks/TASK_TEMPLATE.md'),
+    '# Task Template\n\n## Task ID\n\n`TASK-NNNN`\n\n## Title\n\nOne outcome.\n\n## Status\n\nPlanned\n\n## Phase\n\nNN\n\n## Dependencies\n\nN/A\n\n## House Field\n\nProject-specific field tri knows nothing about.\n\n## Acceptance criteria\n\n- \n');
+  const out = run(ws3, ['new-task', '--title', 'First real task', '--phase', '01']);
+  assertIncludes(out, 'TASK-0001');
+  const t = readFileSync(join(ws3, 'tasks/phase-01/TASK-0001.md'), 'utf8');
+  assertIncludes(t, 'House Field');                       // project template won, not tri's
+  assertIncludes(t, '# TASK-0001: First real task');      // heading still written
+  assertIncludes(t, '`TASK-0001`');                       // placeholder substituted
+  assert(!t.includes('TASK-NNNN'), 'template placeholder left unsubstituted');
+});
+
+check('new-task names the companion files it cannot update itself', () => {
+  const out = run(ws3, ['new-task', '--title', 'Second task', '--phase', '01', '--dep', 'TASK-0001']);
+  assertIncludes(out, 'tasks/README.md');
+  assertIncludes(out, 'tasks/validate-tasks.mjs');
+});
+
+check('no companion warning when the project declares none', () => {
+  const out = run(ws, ['new-task', '--title', 'Plain task', '--phase', '03']);
+  assert(!out.toLowerCase().includes('companion'), `unexpected companion warning:\n${out}`);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

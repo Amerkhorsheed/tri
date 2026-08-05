@@ -88,9 +88,13 @@ tri reads foreign task formats through config instead of rewriting files. Exampl
   "idPrefix": "TASK-",
   "idWidth": 4,
   "statuses": ["Planned", "Ready", "Blocked", "In Progress", "Done"],
-  "evidenceDir": "docs/testing/evidence"
+  "evidenceDir": "docs/testing/evidence",
+  "taskTemplate": "tasks/TASK_TEMPLATE.md",
+  "companionFiles": ["tasks/README.md", "tasks/validate-tasks.mjs"]
 }
 ```
+
+`taskTemplate` makes `new-task` write the project's own template rather than tri's — the project's fields are what its validators enforce. `companionFiles` are files tri deliberately does not edit (task indexes, pinned inventory counts) but names on every creation so they move in the same change.
 
 Drop that in as `tri.config.json` and every command works against the existing tree byte-for-byte unchanged (claims add an `## Assignee` section on first claim; nothing else is rewritten). Verified against a production workspace of 338 governed task files: `validate` clean, frontier and critical-path output matching an independent analysis.
 
@@ -100,4 +104,4 @@ Drop that in as `tri.config.json` and every command works against the existing t
 node scripts/test-tri.mjs
 ```
 
-29 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, and graph metrics.
+32 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, and graph metrics.

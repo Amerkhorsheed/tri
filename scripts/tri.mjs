@@ -32,7 +32,7 @@ function loadConfig() {
   const cfg = JSON.parse(readFileSync(join(root, 'tri.config.json'), 'utf8'));
   return {
     root, idPrefix: 'T-', idWidth: 4, evidenceDir: 'tri/evidence',
-    statuses: STATUSES, ...cfg,
+    statuses: STATUSES, companionFiles: [], ...cfg,
   };
 }
 
@@ -145,14 +145,44 @@ function cmdNewTask(args) {
   const id = `${cfg.idPrefix}${String(maxId + 1).padStart(cfg.idWidth, '0')}`;
   const dir = join(cfg.root, cfg.taskDir, `phase-${phase}`);
   mkdirSync(dir, { recursive: true });
-  const body = readFileSync(join(TEMPLATES, `TASK-${cfg.profile}.md`), 'utf8')
-    .replaceAll('{{ID}}', id)
-    .replaceAll('{{TITLE}}', title)
-    .replaceAll('{{PHASE}}', phase)
-    .replaceAll('{{DEPS}}', deps.length ? deps.map((d) => `- ${d}`).join('\n') : 'N/A');
+  // A project may own its task template; its fields are the contract its
+  // validators enforce, so tri's own template must not overwrite them.
+  const depsBlock = deps.length ? deps.map((d) => `- ${d}`).join('\n') : 'N/A';
+  let body;
+  if (cfg.taskTemplate) {
+    const tplPath = join(cfg.root, cfg.taskTemplate);
+    if (!existsSync(tplPath)) fail(`taskTemplate not found: ${cfg.taskTemplate}`);
+    body = readFileSync(tplPath, 'utf8');
+    // Drop any leading prose above the first field so the result is a task, not a template.
+    const firstField = body.indexOf('## ');
+    if (firstField > 0) body = body.slice(firstField);
+    body = body
+      .replace(new RegExp(`${cfg.idPrefix}N+`, 'g'), id)
+      .replaceAll('{{ID}}', id)
+      .replaceAll('{{TITLE}}', title)
+      .replaceAll('{{PHASE}}', phase)
+      .replaceAll('{{DEPS}}', depsBlock);
+    body = `# ${id}: ${title}\n\n${body}`;
+    // A project template describes its Dependencies field rather than carrying a
+    // placeholder, so write the real dependencies over whatever prose is there.
+    if (!body.includes(depsBlock)) {
+      body = body.replace(/(## Dependencies\n\n)[\s\S]*?(?=\n## )/, `$1${depsBlock}\n`);
+    }
+  } else {
+    body = readFileSync(join(TEMPLATES, `TASK-${cfg.profile}.md`), 'utf8')
+      .replaceAll('{{ID}}', id)
+      .replaceAll('{{TITLE}}', title)
+      .replaceAll('{{PHASE}}', phase)
+      .replaceAll('{{DEPS}}', depsBlock);
+  }
   const file = join(dir, `${id}.md`);
   writeFileSync(file, body);
   out(`created ${id} (${title}) at ${file}`);
+  if (cfg.taskTemplate) out(`  template: ${cfg.taskTemplate} — fill every field the project requires before claiming`);
+  if (cfg.companionFiles.length) {
+    out('  companion files tri cannot update for you — update them in the same change:');
+    for (const f of cfg.companionFiles) out(`    ${f}`);
+  }
 }
 
 function cmdValidate() {
