@@ -12,7 +12,7 @@ This project uses the TRI delivery method (task register + decision registers + 
 8. Run `node ~/.tri/scripts/tri.mjs validate` — must pass.
 9. Run `node ~/.tri/scripts/tri.mjs done <ID>`, commit, push.
 
-New work discovered mid-task: create it with `node ~/.tri/scripts/tri.mjs new-task --title "..." --phase NN [--dep ID]`, don't fold it into the current task.
+New work discovered mid-task: create it with `node ~/.tri/scripts/tri.mjs new-task --title "..." --phase NN [--dep ID]`, don't fold it into the current task. If the project sets `taskTemplate`, the new file uses the project's own template and every one of its fields must be filled before the task is claimed. If it sets `companionFiles`, `new-task` names files it will not edit for you — task indexes and pinned inventory counts — and those must move in the same change or the project's own validator fails.
 
 Batch mode: an agent may execute several tasks in one run. Loop step 1-9 per task without pausing between tasks; track progress in `.tri/run.json` ({scope, mode, queue, done, blocked}); a task needing an owner decision gets a B- entry and Blocked status while the run continues with other runnable tasks; halt only on a red gate after a real fix attempt or when nothing runnable remains. `next --json` and `status --json` provide machine-readable state.
 

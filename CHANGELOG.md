@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.0 — 2026-08-05
+
+- `scripts/check-consistency.mjs`: fails when a change lands in one artifact but
+  not its companions — an undocumented command, an undocumented config key, a
+  version without a changelog entry, a stale test-count claim, a broken link.
+  Caught real drift on its first run: `/tri:go` was missing from the guide, and
+  `commands/status.md` never loaded the tri-method skill.
+- `CONTRIBUTING.md`: the propagation table stating what must move together for
+  each kind of change, and why the version bump is not optional.
+- Guide documents `/tri:go`, structured questions, and the adapter config;
+  the AGENTS.md template tells agents about `taskTemplate` and `companionFiles`.
+
 ## 1.2.0 — 2026-08-05
 
 - `taskTemplate` config: when a project owns its task template, `new-task` uses

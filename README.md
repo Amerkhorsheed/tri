@@ -98,10 +98,12 @@ tri reads foreign task formats through config instead of rewriting files. Exampl
 
 Drop that in as `tri.config.json` and every command works against the existing tree byte-for-byte unchanged (claims add an `## Assignee` section on first claim; nothing else is rewritten). Verified against a production workspace of 338 governed task files: `validate` clean, frontier and critical-path output matching an independent analysis.
 
-## Tests
+## Tests and consistency
 
 ```bash
-node scripts/test-tri.mjs
+node scripts/test-tri.mjs && node scripts/check-consistency.mjs
 ```
+
+The consistency check fails when a change reaches one artifact but not its companions — an undocumented command or config key, a version without a changelog entry, a stale test count, a broken link. See [CONTRIBUTING.md](CONTRIBUTING.md) for what must move together.
 
 32 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, and graph metrics.

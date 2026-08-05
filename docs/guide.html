@@ -64,6 +64,7 @@ claude plugin install tri@tri</code></pre>
 <h2 style="margin-top:0">Commands</h2>
 <table>
 <tr><th>Command</th><th>Use</th></tr>
+<tr><td><code>/tri:go [focus]</code></td><td><b>Start here.</b> Say what you want to work on; tri reads state, picks the right command below, runs it</td></tr>
 <tr><td><code>/tri:next</code></td><td>See ready tasks; claim and start one</td></tr>
 <tr><td><code>/tri:run</code></td><td>Autonomous batch through the gates</td></tr>
 <tr><td><code>/tri:done</code></td><td>Evidence-gated completion + PR</td></tr>
@@ -72,6 +73,28 @@ claude plugin install tri@tri</code></pre>
 <tr><td><code>/tri:grill</code> · <code>/tri:clarify</code></td><td>Stress-test / refine requirements — answers land in files, not chat</td></tr>
 <tr><td><code>/tri:decide</code> · <code>/tri:adr</code></td><td>Register a decision · record an architecture decision</td></tr>
 </table>
+</section>
+
+<section>
+<h2 style="margin-top:0">How tri asks you things</h2>
+<p>Every decision arrives as <b>selectable options</b>, not a wall of prose: the recommended one first and marked, each carrying its real tradeoff, up to four independent questions batched into one turn. Free-text is always available via <i>Other</i>.</p>
+<p>Two deliberate exceptions: <code>/tri:grill</code> asks strictly one question at a time, because each answer shapes the next; and genuinely open-ended answers (wording an objective, naming a thing) stay prose. tri never asks what it can read from the repository — it runs the script and the files first, then asks only what is actually yours to decide.</p>
+</section>
+
+<section>
+<h2 style="margin-top:0">Adopting an existing task tree</h2>
+<p>tri drives a repository that already has tasks, without rewriting a single file. Point <code>tri.config.json</code> at what exists:</p>
+<pre><code>{
+  "profile": "strict",
+  "taskDir": "tasks",
+  "idPrefix": "TASK-",
+  "statuses": ["Planned", "Ready", "Blocked", "In Progress", "Done"],
+  "evidenceDir": "docs/testing/evidence",
+  "workflow": "branch-pr",
+  "taskTemplate": "tasks/TASK_TEMPLATE.md",
+  "companionFiles": ["tasks/README.md", "tasks/validate-tasks.mjs"]
+}</code></pre>
+<p><code>taskTemplate</code> makes <code>new-task</code> write <b>your</b> template — your fields are what your validators enforce. <code>companionFiles</code> are files tri deliberately refuses to edit (task indexes, pinned inventory counts) but names on every creation so they move in the same change. A pinned count is an anti-drift control; a tool that silently updated it would defeat its purpose.</p>
 </section>
 
 <section>
