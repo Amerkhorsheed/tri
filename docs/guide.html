@@ -53,7 +53,7 @@ claude plugin install tri@tri</code></pre>
 <h2 style="margin-top:0">The whole pipeline — /tri:ship</h2>
 <p>One command from "I want to work on X" to built code, in four stages:</p>
 <ol>
-<li><b>Preflight</b> — checks for a dirty worktree, then cuts the run branch so nothing lands on your default branch.</li>
+<li><b>Preflight</b> — dirty worktree, mid-rebase, detached HEAD, stale ref, and already-claimed tasks all stop or redirect the work; then it cuts the run branch so nothing lands on your default branch.</li>
 <li><b>Scope</b> — resolves your area against the real task tree, with counts and blockers.</li>
 <li><b>Interview</b> — reads every task and its ADRs, then asks only what is genuinely yours to decide, as selectable options.</li>
 <li><b>Specify</b> — writes answers into task files, decision and assumption registers, and ADRs. Commits specifications on their own.</li>

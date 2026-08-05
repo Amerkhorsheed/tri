@@ -4,7 +4,7 @@ argument-hint: "[phase NN | N | T-NNNN T-NNNN... | resume]"
 ---
 Load the tri-method skill first (its Batch runs section defines the state file and stop conditions).
 
-**0. Preflight.** Run the tri-method preflight: `git status --porcelain && git branch --show-current`. Stop on a dirty worktree. In `branch-pr` workflow create the run branch (`run/<date>-<scope>`) from the default branch before any commit, and push it immediately.
+**0. Preflight.** Run the tri-method **tier 1, 2 and 3** preflight: worktree and branch state, `git fetch` so the frontier and any allocated identifiers are current, and `git ls-remote --heads origin` so a task already claimed by a pushed branch is not claimed twice. In `branch-pr` workflow create the run branch (`run/<date>-<scope>`) from the default branch before any commit, and push it immediately.
 
 **1. Resume check.** Run `node ~/.tri/scripts/tri.mjs run-state`. If it reports an active run, summarize it and ask via AskUserQuestion: resume or start fresh. `$ARGUMENTS` = `resume` skips the question.
 

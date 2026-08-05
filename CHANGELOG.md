@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.7.0 — 2026-08-05
+
+- Preflight is now tiered and applies to **every** mutating command, not only
+  the three that claim work. Six commands — `decide`, `adr`, `plan`, `grill`,
+  `clarify`, `done` — committed to the repository with no checks at all.
+- Tier 1 (all mutating commands) adds mid-rebase/merge and detached-HEAD stops
+  alongside the dirty-worktree and branch checks.
+- Tier 2 (anything allocating a shared identifier — a decision number, an ADR
+  number, a task id) requires a fetch first. Allocating from a stale ref is how
+  two developers pick the same number, and the collision is invisible until
+  merge.
+- Tier 3 (anything claiming work) checks remote branches, since a pushed branch
+  is the claim.
+
 ## 1.6.0 — 2026-08-05
 
 - Preflight before any work command commits: stop on a dirty worktree, and in

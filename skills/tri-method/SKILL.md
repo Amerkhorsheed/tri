@@ -24,20 +24,64 @@ When a command needs a decision from the user, **present it with the structured 
 - Use prose instead only when the answer is genuinely open-ended (wording an Objective, naming a thing) or when nothing is actually being decided.
 - Never ask what the repository can answer. Read the files, run the script, then ask only the decisions.
 
-## Preflight — before any work command commits anything
+## Preflight — before any command changes anything
 
-`/tri:next`, `/tri:ship`, and `/tri:run` all start here. It takes one command and prevents the two failures that actually mix work up:
+Nine commands write to the repository: `next`, `ship`, `run`, `done`, `clarify`, `grill`, `decide`, `adr`, `plan`, `init`. Each runs the tier below that matches what it is about to change. `status`, `visualize`, and the read phase of `go` change nothing and skip this.
+
+### Tier 1 — every mutating command
 
 ```
-git status --porcelain && git branch --show-current
+git rev-parse --git-dir && git status --porcelain=v1 --branch && git branch --show-current
 ```
 
-- **Uncommitted changes to tracked files** → stop. Report what is dirty and ask whether to commit, stash, or proceed deliberately. Never start new work on top of someone's half-finished edit — including your own from a previous session.
-- **`branch-pr` workflow and you are on the default branch** → create the work branch *before* the first commit. This is the failure that silently lands specs or code on `main`.
-- **`branch-pr` and you are on another task's branch** → say so and branch from the default branch instead. Stacking unrelated work on a task branch makes its PR unreviewable.
-- **`trunk` workflow** → the dirty check still applies; the branch checks do not.
+| Condition | Action |
+|---|---|
+| Not a git repository | Proceed, but say once that no branch or claim protection exists here |
+| `MERGE_HEAD`, `CHERRY_PICK_HEAD`, or a rebase in progress | **Stop.** Finish or abort the operation first; committing into it corrupts the history |
+| Detached HEAD | **Stop.** Commits would be unreachable. Ask which branch to move to |
+| Tracked files modified or staged | **Stop.** Report exactly what is dirty and ask: commit, stash, or proceed deliberately. Never build new work on a half-finished edit |
+| Untracked files only | Proceed, but list them — they are often the previous session's unfinished work |
+| `branch-pr` and on the default branch | Create the work branch **before** the first commit |
+| `branch-pr` and on an unrelated task's branch | Say so; branch from the default branch instead. Stacking unrelated work makes that PR unreviewable |
+| `trunk` workflow | Dirty and mid-operation checks still apply; branch checks do not |
 
-Branch naming: one task → `<task-id-lowercase>-<slug>`. A `/tri:ship` run → `ship/<date>-<slug>`. A `/tri:run` batch → `run/<date>-<scope>`.
+### Tier 2 — commands that allocate a shared identifier
+
+`decide` (D-/B- numbers), `adr` (ADR numbers), `plan` and `new-task` (task ids), and `clarify`/`grill` when they write register entries.
+
+```
+git fetch --quiet && git log --oneline HEAD..@{upstream}
+```
+
+Identifiers are allocated from what you can see. A stale ref means allocating a number someone else already used — the failure is silent locally and only surfaces at merge.
+
+| Condition | Action |
+|---|---|
+| Default branch has moved | Pull or rebase **before** allocating; re-read the register afterwards |
+| Local and remote diverged | **Stop.** Resolve the divergence first |
+| No remote configured | Proceed and say that identifier collision cannot be detected |
+| Remote unreachable | Warn, name the risk (a duplicate D-, ADR, or task id), and let the user decide whether to proceed |
+
+### Tier 3 — commands that claim work
+
+`next`, `ship`, `run`.
+
+```
+git ls-remote --heads origin
+```
+
+| Condition | Action |
+|---|---|
+| A remote branch is named for this task id | It is already claimed. **Stop** and report who, unless the user explicitly takes it over |
+| A pushed `run/*` or `ship/*` branch covers this scope | Same — its first commit claims the whole queue |
+| Local work branch exists but is unpushed | The claim is invisible to everyone else. Push it before working |
+| Task status differs between your ref and the default branch | Trust the default branch; status on an unmerged branch is a proposal |
+
+Push the claim commit immediately. A claim that only exists locally protects nobody.
+
+### Branch naming
+
+One task → `<task-id-lowercase>-<slug>`. A ship run → `ship/<date>-<slug>`. A batch → `run/<date>-<scope>`.
 
 ## The loop
 

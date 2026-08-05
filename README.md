@@ -73,7 +73,13 @@ Claiming is **dynamic and pull-based** — no pre-assigned ranges. Claim when yo
 
 ## Before work starts
 
-Every work command runs a preflight first: stop on a dirty worktree, and in `branch-pr` workflow cut the work branch from the default branch before the first commit. This is what keeps two features from landing in one branch, and keeps specifications and code off `main`.
+Every command that writes to the repository runs a preflight matched to what it changes:
+
+- **Tier 1, all of them** — stop on a dirty worktree, a rebase or merge in progress, or a detached HEAD; under `branch-pr`, cut the work branch from the default branch before the first commit and never commit onto an unrelated task's branch.
+- **Tier 2, anything allocating a shared identifier** (a decision number, an ADR number, a task id) — `git fetch` first. An identifier chosen from a stale ref may already be taken, and the collision is invisible until merge.
+- **Tier 3, anything claiming work** — `git ls-remote --heads origin`. A branch named for the task is a claim; a pushed `run/*` or `ship/*` branch claims its whole queue.
+
+This is what keeps two features out of one branch, specifications and code off the default branch, and two developers from allocating the same number.
 
 ## Batch state and recovery
 
