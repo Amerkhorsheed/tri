@@ -1,9 +1,13 @@
 # Changelog
 
+## 2.0.3 — 2026-08-05
+
+- Numeric phase creation now refuses when canonical and suffixed directories coexist, preventing a silent split even when both names already exist.
+
 ## 2.0.2 — 2026-08-05
 
 - Fixed `new-task --phase NN` for existing task trees with named phase directories. When exactly one `phase-NN-*` directory exists, tri reuses it instead of creating a parallel `phase-NN` tree; exact `NN-label` input is supported and ambiguous matches fail closed.
-- Command workflows now require immediate push/ref verification after claims and work commits, stop on push failure, and ask explicitly before opening or merging PRs.
+- Follow-up hardening: numeric phase creation now refuses when canonical and suffixed directories coexist, preventing a silent split even when both names already exist.
 
 ## 2.0.1 — 2026-08-05
 

@@ -115,7 +115,7 @@ tri reads foreign task formats through config instead of rewriting files. Exampl
 
 `taskTemplate` makes `new-task` write the project's own template rather than tri's — the project's fields are what its validators enforce. `companionFiles` are files tri deliberately does not edit (task indexes, pinned inventory counts) but names on every creation so they move in the same change.
 
-When creating a task, `--phase NN` targets `phase-NN`. If an existing task tree has exactly one suffixed directory such as `phase-12-mobile`, tri reuses it; `--phase NN-label` targets that exact label. Multiple suffixed matches fail instead of choosing silently. A new phase with no match gets the canonical `phase-NN` directory.
+When creating a task, `--phase NN` targets `phase-NN`. If an existing task tree has exactly one suffixed directory such as `phase-12-mobile`, tri reuses it; `--phase NN-label` targets that exact label. Multiple suffixed matches, or a canonical directory alongside a suffixed match, fail instead of choosing silently. A phase with no match gets the canonical `phase-NN` directory.
 
 Drop that in as `tri.config.json` and every command works against the existing tree byte-for-byte unchanged (claims add an `## Assignee` section on first claim; nothing else is rewritten). Verified against a production workspace of 338 governed task files: `validate` clean, frontier and critical-path output matching an independent analysis.
 
@@ -127,4 +127,4 @@ node scripts/test-tri.mjs && node scripts/check-consistency.mjs
 
 The consistency check fails when a change reaches one artifact but not its companions — an undocumented command or config key, a version without a changelog entry, a stale test count, a broken link. See [CONTRIBUTING.md](CONTRIBUTING.md) for what must move together.
 
-41 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, phase directory compatibility, and graph metrics.
+42 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, phase directory compatibility and conflict refusal, and graph metrics.
