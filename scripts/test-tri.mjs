@@ -175,5 +175,66 @@ check('graph reports critical path depth', () => {
   assertIncludes(out, '3'); // T-0002 -> T-0003 -> T-0005 remaining chain
 });
 
+// --- adapter mode: foreign task formats via config (e.g. Compass TASK-NNNN) ---
+const ws2 = mkdtempSync(join(tmpdir(), 'tri-adapt-'));
+
+check('adapter: config with custom idPrefix/statuses reads a Compass-shaped tree', () => {
+  writeFileSync(join(ws2, 'tri.config.json'), JSON.stringify({
+    profile: 'strict', taskDir: 'tasks', idPrefix: 'TASK-', idWidth: 4,
+    statuses: ['Planned', 'Ready', 'Blocked', 'In Progress', 'Done'],
+    evidenceDir: 'docs/evidence',
+  }));
+  const dir = join(ws2, 'tasks/phase-00');
+  execFileSync('mkdir', ['-p', dir, join(ws2, 'docs/evidence')]);
+  // Compass style: linked deps, extra fields, Ready status, no Assignee section
+  writeFileSync(join(dir, 'TASK-0001.md'),
+    '# TASK-0001: Pin the sources\n\n## Status\n\nDone\n\n## Priority\n\nP0\n\n## Dependencies\n\nN/A\n\n## Acceptance criteria\n\n- pinned\n');
+  writeFileSync(join(dir, 'TASK-0002.md'),
+    '# TASK-0002: Build importer\n\n## Status\n\nReady\n\n## Priority\n\nP0\n\n## Dependencies\n\n- [TASK-0001](./TASK-0001.md)\n\n## Acceptance criteria\n\n- imports\n\n## Evidence\n\nN/A\n');
+  const out = run(ws2, ['validate']);
+  assertIncludes(out, 'valid: 2 tasks');
+});
+
+check('adapter: markdown-link dependencies parse and Ready counts as claimable frontier', () => {
+  const out = run(ws2, ['next']);
+  assertIncludes(out, 'TASK-0002');
+});
+
+check('adapter: claim inserts an Assignee section when the file lacks one', () => {
+  run(ws2, ['claim', 'TASK-0002', '--by', 'dev-a']);
+  const t = readFileSync(join(ws2, 'tasks/phase-00/TASK-0002.md'), 'utf8');
+  assertIncludes(t, '## Assignee');
+  assertIncludes(t, 'dev-a');
+  assertIncludes(t, 'In Progress');
+});
+
+check('adapter: strict done gate honors configured evidenceDir', () => {
+  const p = join(ws2, 'tasks/phase-00/TASK-0002.md');
+  writeFileSync(p, readFileSync(p, 'utf8').replace('## Evidence\n\nN/A', '## Evidence\n\n- suite 9/9 pass'));
+  const refused = run(ws2, ['done', 'TASK-0002'], true);
+  assertIncludes(refused, 'docs/evidence');
+  writeFileSync(join(ws2, 'docs/evidence/TASK-0002-20260805.md'), 'evidence');
+  const out = run(ws2, ['done', 'TASK-0002']);
+  assertIncludes(out, 'Done');
+});
+
+check('adapter: multi-line dependency lists are fully parsed, not just the first line', () => {
+  const dir = join(ws2, 'tasks/phase-01');
+  execFileSync('mkdir', ['-p', dir]);
+  // first dep Done, second dep NOT done — task must NOT be ready
+  writeFileSync(join(dir, 'TASK-0010.md'),
+    '# TASK-0010: Later work\n\n## Status\n\nPlanned\n\n## Priority\n\nP2\n\n## Dependencies\n\n- [TASK-0001](../phase-00/TASK-0001.md)\n- [TASK-0011](./TASK-0011.md)\n\n## Acceptance criteria\n\n- later\n');
+  writeFileSync(join(dir, 'TASK-0011.md'),
+    '# TASK-0011: Middle work\n\n## Status\n\nPlanned\n\n## Priority\n\nP2\n\n## Dependencies\n\nN/A\n\n## Acceptance criteria\n\n- mid\n');
+  const out = run(ws2, ['next']);
+  assert(!out.includes('TASK-0010'), `TASK-0010 listed ready despite unmet second dep TASK-0011:\n${out}`);
+  assertIncludes(out, 'TASK-0011');
+});
+
+check('adapter: new-task allocates IDs with the configured prefix', () => {
+  const out = run(ws2, ['new-task', '--title', 'Next thing', '--phase', '00', '--dep', 'TASK-0002']);
+  assertIncludes(out, 'TASK-0012');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

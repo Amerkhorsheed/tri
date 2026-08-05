@@ -27,6 +27,9 @@ Codex / any other agent: works through the project's `AGENTS.md` — `/tri:init`
 | `/tri:status` | Counts, claims, ready frontier, critical path |
 | `/tri:decide <text>` | Append a D- (resolved) or B- (blocking) entry to the decision register |
 | `/tri:adr <text>` | Write an ADR from the template |
+| `/tri:grill <target>` | Stress-test a task/phase/plan — one question at a time, answers captured into registers and task files |
+| `/tri:clarify [target]` | Discuss upcoming work, refine ambiguous requirements, write clarifications back into task files |
+| `/tri:visualize [target]` | In-chat visualization of the graph/phase/frontier for discussion (never writes diagram files into the repo) |
 
 Direct script use (what agents and CI run):
 
@@ -45,10 +48,27 @@ Claiming is **dynamic and pull-based** — no pre-assigned ranges. Claim when yo
 | Task fields | ~8 | ~18 | ~28 |
 | Done gate | `validate` passes | + Evidence section filled | + evidence record file in `tri/evidence/` |
 
+## Adopting an existing task tree
+
+tri reads foreign task formats through config instead of rewriting files. Example — a repo with `tasks/phase-*/TASK-NNNN.md`, five statuses, and evidence records elsewhere:
+
+```json
+{
+  "profile": "strict",
+  "taskDir": "tasks",
+  "idPrefix": "TASK-",
+  "idWidth": 4,
+  "statuses": ["Planned", "Ready", "Blocked", "In Progress", "Done"],
+  "evidenceDir": "docs/testing/evidence"
+}
+```
+
+Drop that in as `tri.config.json` and every command works against the existing tree byte-for-byte unchanged (claims add an `## Assignee` section on first claim; nothing else is rewritten). Verified against a production workspace of 338 governed task files: `validate` clean, frontier and critical-path output matching an independent analysis.
+
 ## Tests
 
 ```bash
 node scripts/test-tri.mjs
 ```
 
-18 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, and graph metrics.
+24 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, and graph metrics.

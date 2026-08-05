@@ -30,44 +30,58 @@ function loadConfig() {
   const root = findRoot();
   if (!root) fail('no tri.config.json found — run `tri init` in the project root first');
   const cfg = JSON.parse(readFileSync(join(root, 'tri.config.json'), 'utf8'));
-  return { root, ...cfg };
+  return {
+    root, idPrefix: 'T-', idWidth: 4, evidenceDir: 'tri/evidence',
+    statuses: STATUSES, ...cfg,
+  };
 }
 
 // ---------- task parsing ----------
+function idRegex(cfg, anchored = false) {
+  const esc = cfg.idPrefix.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
+  return new RegExp(anchored ? `^${esc}\\d+\\.md$` : `${esc}\\d+`, anchored ? '' : 'g');
+}
+
 function taskFiles(cfg) {
   const dir = join(cfg.root, cfg.taskDir);
   if (!existsSync(dir)) return [];
   const files = [];
   for (const entry of readdirSync(dir)) {
     const p = join(dir, entry);
+    const fileRe = idRegex(cfg, true);
     if (statSync(p).isDirectory()) {
-      for (const f of readdirSync(p)) if (/^T-\d+\.md$/.test(f)) files.push(join(p, f));
-    } else if (/^T-\d+\.md$/.test(entry)) files.push(p);
+      for (const f of readdirSync(p)) if (fileRe.test(f)) files.push(join(p, f));
+    } else if (fileRe.test(entry)) files.push(p);
   }
   return files.sort();
 }
 
-function parseTask(file) {
+function parseTask(file, cfg) {
   const text = readFileSync(file, 'utf8');
   const sections = {};
-  const re = /^## (.+?)\n\n?([\s\S]*?)(?=\n## |\n?$)/gm;
-  let m;
-  while ((m = re.exec(text)) !== null) sections[m[1].trim()] = m[2].trim();
+  // Split on H2 headings; regex lookaheads with $ and the m flag truncate
+  // multi-line sections at the first line end, so split parsing is used instead.
+  const parts = text.split(/^## /m).slice(1);
+  for (const part of parts) {
+    const nl = part.indexOf('\n');
+    if (nl < 0) continue;
+    sections[part.slice(0, nl).trim()] = part.slice(nl + 1).trim();
+  }
   const id = basename(file, '.md');
   const deps = (sections['Dependencies'] ?? '')
-    .split('\n').join(' ').match(/T-\d+/g) ?? [];
+    .split('\n').join(' ').match(idRegex(cfg)) ?? [];
   return {
     id, file, text, sections,
     status: sections['Status'] ?? '',
     assignee: sections['Assignee'] ?? 'N/A',
     priority: sections['Priority'] ?? 'P1',
-    title: (text.match(/^# T-\d+:\s*(.+)$/m) ?? [,''])[1],
+    title: (text.match(new RegExp(`^# ${cfg.idPrefix.replace(/[-]/g, '\\-')}\\d+:\\s*(.+)$`, 'm')) ?? [,''])[1],
     deps: [...new Set(deps.filter((d) => d !== id))],
   };
 }
 
 function loadTasks(cfg) {
-  return taskFiles(cfg).map(parseTask);
+  return taskFiles(cfg).map((f) => parseTask(f, cfg));
 }
 
 function setSection(task, name, value) {
@@ -89,7 +103,7 @@ function byId(tasks) {
 }
 
 function readyTasks(tasks, map) {
-  return tasks.filter((t) => t.status === 'Planned'
+  return tasks.filter((t) => (t.status === 'Planned' || t.status === 'Ready')
     && t.deps.every((d) => map.get(d)?.status === 'Done'));
 }
 
@@ -133,8 +147,8 @@ function cmdNewTask(args) {
   const phase = argValue(args, '--phase') ?? '01';
   const deps = argValues(args, '--dep');
   const tasks = loadTasks(cfg);
-  const maxId = tasks.reduce((n, t) => Math.max(n, parseInt(t.id.slice(2), 10)), 0);
-  const id = `T-${String(maxId + 1).padStart(4, '0')}`;
+  const maxId = tasks.reduce((n, t) => Math.max(n, parseInt(t.id.slice(cfg.idPrefix.length), 10)), 0);
+  const id = `${cfg.idPrefix}${String(maxId + 1).padStart(cfg.idWidth, '0')}`;
   const dir = join(cfg.root, cfg.taskDir, `phase-${phase}`);
   mkdirSync(dir, { recursive: true });
   const body = readFileSync(join(TEMPLATES, `TASK-${cfg.profile}.md`), 'utf8')
@@ -154,7 +168,7 @@ function cmdValidate() {
   const errors = [];
   const warnings = [];
   for (const t of tasks) {
-    if (!STATUSES.includes(t.status)) errors.push(`${t.id}: unknown status "${t.status}" (allowed: ${STATUSES.join(', ')})`);
+    if (!cfg.statuses.includes(t.status)) errors.push(`${t.id}: unknown status "${t.status}" (allowed: ${cfg.statuses.join(', ')})`);
     for (const d of t.deps) if (!map.has(d)) errors.push(`${t.id}: dependency ${d} does not exist`);
     if (!t.title) errors.push(`${t.id}: missing "# ${t.id}: Title" heading`);
     for (const sec of ['Status', 'Dependencies', 'Acceptance criteria']) {
@@ -197,7 +211,7 @@ function cmdNext() {
 
 function cmdClaim(args) {
   const cfg = loadConfig();
-  const id = args.find((a) => /^T-\d+$/.test(a)) ?? fail('usage: claim T-NNNN --by <name>');
+  const id = args.find((a) => idRegex(cfg, false).test(a)) ?? fail(`usage: claim ${cfg.idPrefix}NNNN --by <name>`);
   const by = argValue(args, '--by') ?? fail('--by <name> required');
   const tasks = loadTasks(cfg);
   const map = byId(tasks);
@@ -209,24 +223,28 @@ function cmdClaim(args) {
   const unmet = t.deps.filter((d) => map.get(d)?.status !== 'Done');
   if (unmet.length) out(`warning: ${id} has dependencies not Done: ${unmet.join(', ')} — claim is advisory, proceeding`);
   setSection(t, 'Status', 'In Progress');
-  const t2 = parseTask(t.file);
+  let t2 = parseTask(t.file, cfg);
+  if (!('Assignee' in t2.sections)) {
+    writeFileSync(t2.file, t2.text.replace(/(## Status\n\nIn Progress\n)/, `$1\n## Assignee\n\nN/A\n`));
+    t2 = parseTask(t2.file, cfg);
+  }
   setSection(t2, 'Assignee', by);
   out(`${id} claimed by ${by}`);
 }
 
 function cmdRelease(args) {
   const cfg = loadConfig();
-  const id = args.find((a) => /^T-\d+$/.test(a)) ?? fail('usage: release T-NNNN');
+  const id = args.find((a) => idRegex(cfg, false).test(a)) ?? fail(`usage: release ${cfg.idPrefix}NNNN`);
   const t = byId(loadTasks(cfg)).get(id) ?? fail(`${id} not found`);
   if (t.status !== 'In Progress') fail(`${id} is not In Progress`);
   setSection(t, 'Status', 'Planned');
-  setSection(parseTask(t.file), 'Assignee', 'N/A');
+  setSection(parseTask(t.file, cfg), 'Assignee', 'N/A');
   out(`${id} released back to Planned`);
 }
 
 function cmdDone(args) {
   const cfg = loadConfig();
-  const id = args.find((a) => /^T-\d+$/.test(a)) ?? fail('usage: done T-NNNN');
+  const id = args.find((a) => idRegex(cfg, false).test(a)) ?? fail(`usage: done ${cfg.idPrefix}NNNN`);
   const t = byId(loadTasks(cfg)).get(id) ?? fail(`${id} not found`);
   if (t.status !== 'In Progress') fail(`${id} is not In Progress (status: ${t.status}) — claim it first`);
   if (cfg.profile !== 'lite') {
@@ -234,9 +252,9 @@ function cmdDone(args) {
     if (!ev || ev === 'N/A') fail(`${id}: Evidence section is empty — record commands and observed results before done`);
   }
   if (cfg.profile === 'strict') {
-    const evDir = join(cfg.root, 'tri/evidence');
+    const evDir = join(cfg.root, cfg.evidenceDir);
     const has = existsSync(evDir) && readdirSync(evDir).some((f) => f.startsWith(id));
-    if (!has) fail(`${id}: strict profile requires an evidence record at tri/evidence/${id}-<date>.md`);
+    if (!has) fail(`${id}: strict profile requires an evidence record at ${cfg.evidenceDir}/${id}-<date>.md`);
   }
   setSection(t, 'Status', 'Done');
   out(`${id} marked Done`);
