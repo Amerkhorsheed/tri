@@ -14,7 +14,8 @@ Load the tri-method skill first. This command is a router: read the workspace st
 | Unfinished `.tri/run.json` | `/tri:run` (resume) |
 | No `tri.config.json` in the project | `/tri:init` |
 | Ask describes a spec, feature, or goal with no tasks behind it yet | `/tri:plan` |
-| Ask names an architectural change — new dependency, service, boundary, changed contract, or contradicts an Accepted ADR | `/tri:adr` (and say plainly that implementation is blocked until it lands) |
+| Ask **proposes or questions** an architectural change the user has not settled — "should we switch to X", "I'm considering Y", or anything contradicting an Accepted ADR without stating the decision as made | `/tri:grill` first. An ADR records a decision; writing one for an unsettled choice manufactures a conclusion the user never reached |
+| Ask states a **settled** architectural decision — new dependency, service, boundary, changed contract | `/tri:adr` (and say plainly that implementation is blocked until it lands) |
 | Ask states a resolved choice, or names an open question nobody present can answer | `/tri:decide` |
 | Ask expresses doubt, risk, "is this right", "stress test", "poke holes" | `/tri:grill` |
 | Target task exists but its Objective/Acceptance criteria are vague, contradictory, or its deps look ceremonial | `/tri:clarify` (do this **before** claiming — clarifying after implementation starts wastes the work) |

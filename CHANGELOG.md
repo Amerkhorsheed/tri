@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.1 — 2026-08-05
+
+- `/tri:go` routing fix: an architectural ask that is proposed rather than
+  decided ("should we switch to X") now routes to `/tri:grill` before
+  `/tri:adr`. The previous table sent any architectural ask straight to the
+  ADR, which would have written a decision record for a choice the user had
+  not made — and skipped the stress-test that surfaces blocking constraints.
+
 ## 1.4.0 — 2026-08-05
 
 - `/tri:ship <area>`: the whole pipeline in one command — scope, interview,
