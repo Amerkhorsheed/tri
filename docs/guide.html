@@ -86,6 +86,11 @@ claude plugin install tri@tri</code></pre>
 <tr><td><code>/tri:status</code> · <code>/tri:visualize</code></td><td>Counts, claims, critical path · interactive HTML board</td></tr>
 <tr><td><code>/tri:clarify</code></td><td>Interrogate and refine what is unclear — batched for specs, one at a time for decisions. Answers land in files, not chat</td></tr>
 <tr><td><code>/tri:adr</code></td><td>Record an architecture decision, then re-specify what it unblocks</td></tr>
+<tr><td><code>/tri:sync</code> · <code>/tri:validate --remote</code></td><td>Fetch remote branches, reserve identifiers, and fail CI on cross-branch collisions</td></tr>
+<tr><td><code>/tri:evidence</code></td><td>Capture command result with structured runtime execution context</td></tr>
+<tr><td><code>/tri:companions --check</code></td><td>Check configured companion files and invoke maintenance hooks</td></tr>
+<tr><td><code>/tri:doctor</code></td><td>Warn on governing-document drift and identifier collisions</td></tr>
+<tr><td><code>/tri:rebaseline</code></td><td>Advance charter, registers/ADRs, policies/contracts, agent-facing docs, then tasks</td></tr>
 </table>
 </section>
 
@@ -112,9 +117,15 @@ claude plugin install tri@tri</code></pre>
   "evidenceDir": "docs/testing/evidence",
   "workflow": "branch-pr",
   "taskTemplate": "tasks/TASK_TEMPLATE.md",
-  "companionFiles": ["tasks/README.md", "tasks/validate-tasks.mjs"]
+  "companionFiles": ["tasks/README.md", "tasks/validate-tasks.mjs"],
+  "companions": [{"path": "tasks/README.md", "strategy": "check"}],
+  "companionHooks": {"new-task": ["node", "scripts/update-companions.mjs"]},
+  "runtimeProbes": [["php", "--version"]],
+  "expectedEnvironment": {"node": "v24"},
+  "defaultBranch": "main",
+  "baseBranch": "dev"
 }</code></pre>
-<p><code>taskTemplate</code> makes <code>new-task</code> write <b>your</b> template — your fields are what your validators enforce. <code>companionFiles</code> are files tri deliberately refuses to edit (task indexes, pinned inventory counts) but names on every creation so they move in the same change. A pinned count is an anti-drift control; a tool that silently updated it would defeat its purpose.</p>
+<p><code>taskTemplate</code> makes <code>new-task</code> write <b>your</b> template — your fields are what your validators enforce. A missing or malformed configured template fails rather than falling back. <code>companionFiles</code> remains legacy check-only configuration; <code>companions</code> adds strategies and <code>companionHooks</code> invokes argv-array hooks after task creation, validation, completion, or checks. `sync` scans remote branches against the configured default branch and reserves identifiers; `validate --remote` promotes collisions to errors. Evidence records can include hostname/container, declared runtime probes, commit, branch, and expected-environment warnings. Generated tasks start <code>Unrevised</code>; old tasks default to <code>Specified</code>; <code>Withdrawn</code> remains retained but excluded from frontier. A pinned count is an anti-drift control; a tool that silently updated it would defeat its purpose.</p>
 <p>For <code>--phase NN</code>, tri uses <code>phase-NN</code> when present. In an existing tree, one suffixed match such as <code>phase-12-mobile</code> is reused; <code>--phase NN-label</code> selects an exact label. Multiple suffixed matches, or a canonical directory alongside a suffixed match, fail rather than choosing silently. A phase with no match creates canonical <code>phase-NN</code>.</p>
 </section>
 

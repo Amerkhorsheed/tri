@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.2.0 — 2026-08-06
+
+- Added collision-safe remote identifier reservations, `sync`, and `validate --remote` for task, ADR, and register identifiers.
+- Added structured evidence execution context, expected-environment warnings, and the `evidence` command while preserving legacy evidence records.
+- Added configured task-template validation, companion strategies/hooks and `companions --check`.
+- Added first-class `Withdrawn` lifecycle status, specification status (`Unrevised`/`Specified`/`Withdrawn`), boilerplate warnings, and TODO objectives for generated tasks.
+- Added `doctor` governing-document warnings and ordered `rebaseline` state machine.
+- Added command, skill, template, and cross-agent documentation for new safeguards.
+
 ## 2.1.0 — 2026-08-05
 
 - Added explicit claim-scope manifests with task, responsibility, ADR, owner, and future-coverage fields. Claims validate and refuse overlapping local scopes instead of inferring ownership from branch names.

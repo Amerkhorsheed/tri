@@ -3,7 +3,7 @@
 // Builds a throwaway workspace in a temp dir, seeds defects, asserts behavior.
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -182,11 +182,30 @@ check('done succeeds once Evidence is filled, and unblocks dependents', () => {
   assertIncludes(next, 'T-0002');
 });
 
-// --- status and graph ---
+check('validate recognizes Withdrawn tasks and warns about withdrawn dependencies', () => {
+  const withdrawn = join(ws, 'tri/tasks/phase-03/T-0008.md');
+  mkdirSync(dirname(withdrawn), { recursive: true });
+  writeFileSync(withdrawn, '# T-0008: Withdrawn work\n\n## Status\n\nWithdrawn\n\n## Dependencies\n\nN/A\n\n## Acceptance criteria\n\n- retained\n');
+  const dependent = join(ws, 'tri/tasks/phase-03/T-0009.md');
+  writeFileSync(dependent, '# T-0009: Follow-up\n\n## Status\n\nPlanned\n\n## Dependencies\n\n- T-0008\n\n## Acceptance criteria\n\n- follow\n');
+  const out = run(ws, ['validate']);
+  assertIncludes(out, 'depends on Withdrawn');
+  assert(!run(ws, ['next']).includes('T-0008'), 'Withdrawn task entered frontier');
+});
+
+check('generated tasks are marked Unrevised and next flags them', () => {
+  const out = run(ws, ['new-task', '--title', 'Generated specification', '--phase', '04']);
+  assertIncludes(out, 'T-0010');
+  const text = readFileSync(join(ws, 'tri/tasks/phase-04/T-0010.md'), 'utf8');
+  assertIncludes(text, '## Specification status\n\nUnrevised');
+  assertIncludes(text, 'TODO: state what is true after this task');
+  assertIncludes(run(ws, ['next']), 'Unrevised');
+});
+
 check('status reports counts, frontier, and claims', () => {
   const out = run(ws, ['status']);
   assertIncludes(out, 'Done: 1');
-  assertIncludes(out, 'Planned: 4');
+  assertIncludes(out, 'Planned: 6');
 });
 
 check('graph reports critical path depth', () => {
@@ -375,12 +394,12 @@ check('malformed config fails with a readable message, not a stack trace', () =>
   assert(!out.includes('at JSON.parse'), `leaked a stack trace:\n${out}`);
 });
 
-check('new-task warns that IDs are allocated from the local tree only', () => {
+check('new-task reports collision-safe remote/default-branch allocation', () => {
   writeFileSync(join(ws4, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks' }));
   const out = run(ws4, ['new-task', '--title', 'First', '--phase', '01']);
   assertIncludes(out, 'T-0001');
-  assert(/pull|local tree|another developer/i.test(out),
-    `no collision warning in output:\n${out}`);
+  assert(/remote|default branch|next free identifier/i.test(out),
+    `no collision-safe allocation notice in output:\n${out}`);
 });
 
 check('release refuses to take another developer\'s claim without --force', () => {
@@ -397,10 +416,15 @@ check('release by the holder needs no force', () => {
   assertIncludes(out, 'released');
 });
 
+check('run-state refuses Unrevised queue without explicit override', () => {
+  run(ws4, ['new-task', '--title', 'Unrevised queue target', '--phase', '01']);
+  const out = run(ws4, ['run-state', '--start', 'unrevised', '--mode', 'sequential', '--queue', 'T-0002'], true);
+  assertIncludes(out, '--allow-unrevised');
+});
 check('run-state records a batch and survives to be resumed', () => {
   run(ws4, ['new-task', '--title', 'Second', '--phase', '01']);
   run(ws4, ['new-task', '--title', 'Third', '--phase', '01']);
-  const started = run(ws4, ['run-state', '--start', 'phase 01', '--mode', 'sequential', '--queue', 'T-0001,T-0002,T-0003']);
+  const started = run(ws4, ['run-state', '--start', 'phase 01', '--mode', 'sequential', '--queue', 'T-0001,T-0002,T-0003', '--allow-unrevised']);
   assertIncludes(started, 'T-0001');
   const state = JSON.parse(readFileSync(join(ws4, '.tri/run.json'), 'utf8'));
   assert(state.queue.length === 3, `queue not recorded: ${JSON.stringify(state)}`);
