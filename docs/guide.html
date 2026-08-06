@@ -65,7 +65,7 @@ claude plugin install tri@tri</code></pre>
 <section>
 <h2 style="margin-top:0">Batch execution — /tri:run</h2>
 <ol>
-<li>Run surveys the frontier and offers real scopes: <i>until-blocked · one phase · N tasks · named tasks</i>; then sequential vs parallel subagents.</li>
+<li>Run surveys the frontier and offers real scopes: <i>until-blocked · one phase · N tasks · named tasks</i>; then the execution model — sequential, parallel subagents, or a team of agents (Claude Code only) — recommended by batch shape: sequential for small batches, chains, or overlapping files; parallel for ≥ 4 file-disjoint tasks; teams for large disjoint batches.</li>
 <li>Loops the single-task loop with <b>no questions between tasks</b>. State is recorded through <code>run-state</code> after every task, so a killed session resumes exactly where it stopped.</li>
 <li>A task needing an owner decision gets its B- entry, goes Blocked, and the run <b>continues with other runnable work</b>; questions batch to the end.</li>
 <li>Halts only on: red gate after a real fix attempt, or nothing runnable left.</li>

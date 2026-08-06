@@ -54,7 +54,7 @@ Do not proceed without an explicit answer. This is the only pause; make it count
 
 ## Stage 4 — Implement
 
-Hand off to the `/tri:run` loop with the queue from stage 3, and follow its rules exactly: ask the scope-and-mode question once (sequential, or parallel subagents when the tasks touch disjoint files), record the queue with `run-state --start`, then run task after task — claim, implement, test, evidence, `validate`, `done`, commit — **with no further questions**. A task needing an owner decision gets its `B-` entry and is parked while the run continues. Halt only on a red gate after a real fix attempt, or when nothing runnable remains.
+Hand off to the `/tri:run` loop with the queue from stage 3, and follow its rules exactly: ask the scope-and-execution-model question once — sequential, parallel subagents, or a team of agents (Claude Code only) — recommending by batch shape (sequential for ≤ 3 tasks, chains deeper than 2, or overlapping files; parallel subagents for ≥ 4 disjoint tasks; team only for ≥ 8 substantial disjoint tasks), then record the queue with `run-state --start`, then run task after task — claim, implement, test, evidence, `validate`, `done`, commit — **with no further questions**. A task needing an owner decision gets its `B-` entry and is parked while the run continues. Halt only on a red gate after a real fix attempt, or when nothing runnable remains.
 
 Stay on the stage-0 branch: implementation commits stack on top of the specification commit, one atomic commit per task, and the PR at the end (or per phase boundary) carries both. Parallel subagent runs still use per-task branches, since simultaneous workers cannot share one.
 

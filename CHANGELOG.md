@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.5.0 — 2026-08-06
+
+- `/tri:run` and `/tri:ship` now choose an execution model — sequential, parallel subagents, or a team of agents — recommended by batch shape instead of a one-line heuristic: sequential for ≤ 3 tasks, chains deeper than 2, or overlapping files; parallel subagents for ≥ 4 file-disjoint tasks; a team (Claude Code only, experimental) for ≥ 8 substantial disjoint tasks, degrading to parallel subagents anywhere else.
+- The three models are documented as distinct contracts, not one knob: subagents stay isolated with zero shared context, a team shares a plan and can re-plan mid-run, and the main thread stays the gate-keeper (run-state, `validate`, Evidence, `done`) in both.
+- `run-state --start` validates the mode (`sequential|parallel|team`) and warns when a non-sequential mode queues tasks that declare overlapping `Expected files`.
+
 ## 2.4.0 — 2026-08-06
 
 - A dependency on a `Withdrawn` task no longer deadlocks: it warns in `done` and does not block the frontier, matching what `validate` already reported.

@@ -14,6 +14,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const TEMPLATES = join(SCRIPT_DIR, '..', 'templates');
 const STATUSES = ['Planned', 'In Progress', 'Blocked', 'Done', 'Withdrawn'];
 const SPECIFICATION_STATUSES = ['Unrevised', 'Specified', 'Withdrawn'];
+const RUN_MODES = ['sequential', 'parallel', 'team'];
 const PROFILES = ['lite', 'standard', 'strict'];
 const REBASELINE_LAYERS = [
   { id: 'charter', label: 'charter', paths: ['PROJECT_CHARTER.md'] },
@@ -1094,6 +1095,28 @@ f.oninput=()=>render(f.value);render('');
 
 function runStatePath(cfg) { return join(cfg.root, '.tri', 'run.json'); }
 
+function taskExpectedFiles(t) {
+  const files = new Set();
+  for (const line of (t.sections['Expected files'] ?? '').split('\n')) {
+    const match = line.match(/(?:^|[\s`*[(-])([\w.-]+(?:\/[\w.-]+)+\.\w{1,5})/);
+    if (match) files.add(match[1].replace(/^\.\//, ''));
+  }
+  return files;
+}
+
+function runOverlapWarnings(queue, map) {
+  const warnings = [];
+  for (let i = 0; i < queue.length; i++) {
+    for (let j = i + 1; j < queue.length; j++) {
+      const a = queue[i], b = queue[j];
+      for (const file of taskExpectedFiles(map.get(a))) {
+        if (taskExpectedFiles(map.get(b)).has(file)) warnings.push(`${a} and ${b} both touch ${file}`);
+      }
+    }
+  }
+  return warnings;
+}
+
 function cmdRunState(args) {
   const cfg = loadConfig();
   const p = runStatePath(cfg);
@@ -1114,8 +1137,15 @@ function cmdRunState(args) {
     if (unrevised.length && !args.includes('--allow-unrevised')) {
       fail(`run includes Unrevised tasks: ${unrevised.join(', ')} — clarify before implementation or pass --allow-unrevised deliberately`);
     }
+    const mode = argValue(args, '--mode') ?? 'sequential';
+    if (!RUN_MODES.includes(mode)) fail(`unknown run mode "${mode}" (${RUN_MODES.join('|')})`);
+    if (mode !== 'sequential') {
+      for (const warning of runOverlapWarnings(queue, tasks)) {
+        out(`warning: ${mode} run queues tasks that declare overlapping Expected files: ${warning} — prefer sequential, or extract the shared file to its own task`);
+      }
+    }
     const state = {
-      scope, mode: argValue(args, '--mode') ?? 'sequential',
+      scope, mode,
       queue, done: [], blocked: [], startedAt: new Date().toISOString(), finishedAt: null,
     };
     save(state);

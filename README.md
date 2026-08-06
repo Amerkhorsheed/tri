@@ -47,7 +47,7 @@ Full walkthrough with commands, batch runs, and profiles: [docs/guide.html](docs
 | `/tri:done <T-NNNN>` | Evidence-gated completion |
 | `/tri:status` | Counts, claims, ready frontier, critical path |
 | `/tri:adr <text>` | Write an ADR from the template |
-| `/tri:run [scope]` | Autonomous batch execution — asks scope (phase/N/until-blocked) and mode (sequential/parallel subagents) once, then runs task after task through the gates without checkpoints; resumable via `.tri/run.json` |
+| `/tri:run [scope]` | Autonomous batch execution — asks scope and execution model once (sequential / parallel subagents / team, recommended by batch shape), then runs task after task through the gates without checkpoints; resumable via `.tri/run.json` |
 | `/tri:clarify [target]` | Interrogate and refine what is unclear — a task, a phase, or a decision you doubt. Batches questions for specs, goes one at a time for decisions. Writes results into files and registers |
 | `/tri:visualize [target]` | Interactive HTML board (phase lanes, dependencies, critical path) written to gitignored `.tri/`, opened for discussion |
 | `/tri:sync` | Fetch remote branches and reserve task/register identifiers allocated off default branch |
@@ -68,7 +68,7 @@ node scripts/tri.mjs <init|new-task|validate|next|claim|release|done|status|grap
 
 ## Batch execution vs the gates
 
-Like GSD's execute-phase or spec-kit's implement, `/tri:run` chews through many tasks in one go. In branch-pr workflow a sequential run uses one run branch with an atomic commit per task and one PR per phase boundary (per-task PRs would break intra-run dependency chains — the next task needs the previous one's unmerged code); parallel subagent runs keep per-task PRs; contract-touching tasks get extracted to their own PR for review. The loop's safety is mechanical, not vigilance-based: a task can't pass `done` with empty Evidence, `validate` failure halts the run, and a missing owner decision becomes a Blocked task plus register entry while the run continues elsewhere. Speed comes from never pausing between good tasks; safety from being unable to coast past a bad one.
+Like GSD's execute-phase or spec-kit's implement, `/tri:run` chews through many tasks in one go. In branch-pr workflow a sequential run uses one run branch with an atomic commit per task and one PR per phase boundary (per-task PRs would break intra-run dependency chains — the next task needs the previous one's unmerged code); parallel subagent runs keep per-task PRs; contract-touching tasks get extracted to their own PR for review. The execution model is chosen at start and recommended by batch shape: sequential for small batches or overlapping files, parallel subagents for ≥ 4 file-disjoint tasks, and a team of agents (Claude Code only) for large disjoint batches — teams share context and can re-plan mid-run; subagents stay isolated; on hosts without teams, degrade to parallel subagents. The loop's safety is mechanical, not vigilance-based: a task can't pass `done` with empty Evidence, `validate` failure halts the run, a missing owner decision becomes a Blocked task plus register entry while the run continues elsewhere, and `run-state --start` rejects unknown modes and warns when a non-sequential mode queues tasks declaring overlapping Expected files. Speed comes from never pausing between good tasks; safety from being unable to coast past a bad one.
 
 ## Parallel developers
 
@@ -92,7 +92,7 @@ This is what keeps two features out of one branch, specifications and code off t
 
 ## Batch state and recovery
 
-`run-state` is the mechanical record of a batch: `--start` with a scope, mode and queue; `--done`/`--blocked` after each task; `--finish` at the end. Bare `run-state` prints what remains, so a session killed mid-batch resumes exactly where it stopped rather than relying on the agent having remembered. The file lives in gitignored `.tri/` and is never hand-edited.
+`run-state` is the mechanical record of a batch: `--start` with a scope, execution model (`sequential|parallel|team`) and queue; `--done`/`--blocked` after each task; `--finish` at the end. Bare `run-state` prints what remains, so a session killed mid-batch resumes exactly where it stopped rather than relying on the agent having remembered. The file lives in gitignored `.tri/` and is never hand-edited.
 
 ## Profiles
 
@@ -142,4 +142,4 @@ node scripts/test-tri.mjs && node scripts/check-consistency.mjs
 
 The consistency check fails when a change reaches one artifact but not its companions — an undocumented command or config key, a version without a changelog entry, a stale test count, a broken link. See [CONTRIBUTING.md](CONTRIBUTING.md) for what must move together.
 
-61 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, Withdrawn and Unrevised lifecycle behavior, phase directory compatibility and conflict refusal, graph metrics, remote reservation failures/collisions, canonical doctor checks, and the post-2.1.0 hardening regressions.
+63 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, Withdrawn and Unrevised lifecycle behavior, phase directory compatibility and conflict refusal, graph metrics, remote reservation failures/collisions, canonical doctor checks, the post-2.1.0 hardening regressions, and execution-model mode validation with Expected-files overlap warnings.
