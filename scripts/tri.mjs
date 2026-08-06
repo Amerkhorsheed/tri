@@ -118,12 +118,16 @@ function git(args, cwd, allowFailure = false) {
 }
 
 function remotePolicyConfigured(cfg) {
-  return cfg.requireRemoteReservations === true || cfg.remote !== undefined || cfg.defaultBranch !== undefined;
+  if (cfg.requireRemoteReservations === true || cfg.remote !== undefined || cfg.defaultBranch !== undefined || cfg.baseBranch !== undefined) return true;
+  const repository = git(['rev-parse', '--git-dir'], cfg.root, true);
+  if (repository.status !== 0 || repository.error) return false;
+  const origin = git(['remote', 'get-url', 'origin'], cfg.root, true);
+  return origin.status === 0 && !origin.error;
 }
 
 function gitRef(cfg) {
   // Identifier reservations compare against repository default branch, not PR target.
-  const branch = cfg.defaultBranch ?? 'main';
+  const branch = cfg.defaultBranch ?? cfg.baseBranch ?? 'main';
   const remote = cfg.remote ?? 'origin';
   return `${remote}/${branch}`;
 }
@@ -212,6 +216,7 @@ function refreshRemote(cfg) {
 
 function remoteIdentifierInventory(cfg) {
   const baseRef = gitRef(cfg);
+  if (!remotePolicyConfigured(cfg)) return { available: false, localOnly: true, baseRef, reason: 'no configured or reachable origin remote', branches: [], reserved: new Map(), collisions: [] };
   const baseTree = treeFilesResult(cfg, baseRef);
   if (!baseTree.ok) return { available: false, baseRef, reason: baseTree.reason, branches: [], reserved: new Map(), collisions: [] };
   const refs = remoteRefsResult(cfg);
