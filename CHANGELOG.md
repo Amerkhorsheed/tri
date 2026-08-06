@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.4.0 — 2026-08-06
+
+- A dependency on a `Withdrawn` task no longer deadlocks: it warns in `done` and does not block the frontier, matching what `validate` already reported.
+- Evidence runtime checks warn when **any** recorded run came from outside the expected environment, not only when every run did — the mixed host/container case from the field report can no longer pass silently.
+- `new-task` with a project `taskTemplate` now fails instead of silently dropping a `--phase` or `--dep` the template cannot express.
+- `validate` flags a single task whose Objective restates its title verbatim instead of waiting for a majority of tasks to share the defect.
+- `/tri:clarify`, `plan`, and `ship` now document the promotion rule: `Unrevised` becomes `Specified` only when the run actually edited Objective and Acceptance criteria.
+- `rebaseline` layer paths follow configured `adrDir` and `decisionFiles` instead of hardcoded `tri/adr`, and honor `baseBranch` when `defaultBranch` is unset.
+- `done` in lite profile no longer warns about evidence execution context the profile does not require; removed dead identifier-map code.
+
 ## 2.3.0 — 2026-08-06
 
 - Hardened remote identifier inventory to fail closed when configured refs, fetches, or branch comparisons are unavailable.

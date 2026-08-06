@@ -154,8 +154,6 @@ function treeFilesResult(cfg, ref) {
   return { ok: true, files: result.stdout.split(/\r?\n/).map((x) => x.trim()).filter(Boolean) };
 }
 
-function treeFiles(cfg, ref) { return treeFilesResult(cfg, ref).files; }
-
 function showRefFileResult(cfg, ref, file) {
   const result = git(['show', `${ref}:${file}`], cfg.root, true);
   if (result.status !== 0 || result.error) {
@@ -165,8 +163,6 @@ function showRefFileResult(cfg, ref, file) {
   }
   return { ok: true, missing: false, text: result.stdout };
 }
-
-function showRefFile(cfg, ref, file) { return showRefFileResult(cfg, ref, file).text; }
 
 function definitionIdentifiers(cfg, file, text) {
   const ids = new Map();
@@ -181,21 +177,6 @@ function definitionIdentifiers(cfg, file, text) {
     ids.set(match[1], `${file}:${match.index}`);
   }
   return ids;
-}
-
-function fileIdentifiers(cfg, file, text) {
-  return definitionIdentifiers(cfg, file, text);
-}
-
-function treeIdentifierMap(cfg, ref, files = treeFiles(cfg, ref)) {
-  const map = new Map();
-  for (const file of files) {
-    const text = showRefFile(cfg, ref, file);
-    for (const [id, location] of fileIdentifiers(cfg, file, text)) {
-      if (!map.has(id)) map.set(id, { id, ref, file, location });
-    }
-  }
-  return map;
 }
 
 function refreshRemote(cfg) {
@@ -271,7 +252,7 @@ function localIdentifierMap(cfg, tasks = loadTasks(cfg)) {
       : [path];
     for (const file of files) if (existsSync(file)) {
       const text = readFileSync(file, 'utf8');
-      for (const [id, location] of fileIdentifiers(cfg, relative(cfg.root, file), text)) {
+      for (const [id, location] of definitionIdentifiers(cfg, relative(cfg.root, file), text)) {
         if (!map.has(id)) map.set(id, { id, file: relative(cfg.root, file), branch: 'worktree', location });
       }
     }
@@ -551,10 +532,14 @@ function byId(tasks) {
   return map;
 }
 
+function depSatisfied(dep) {
+  return dep && (dep.status === 'Done' || dep.status === 'Withdrawn' || dep.specificationStatus === 'Withdrawn');
+}
+
 function readyTasks(tasks, map) {
   return tasks.filter((t) => (t.status === 'Planned' || t.status === 'Ready')
     && t.status !== 'Withdrawn' && t.specificationStatus !== 'Withdrawn'
-    && t.deps.every((d) => map.get(d)?.status === 'Done'));
+    && t.deps.every((d) => depSatisfied(map.get(d))));
 }
 
 function nextNumericId(cfg, prefix, tasks = loadTasks(cfg)) {
@@ -578,6 +563,13 @@ function sectionBody(text, name) {
 
 function boilerplateWarnings(tasks) {
   const warnings = [];
+  const titleCopies = tasks.filter((t) => {
+    const title = t.title?.trim().toLowerCase();
+    if (!title || title.length < 5) return false;
+    const objective = sectionBody(t.text, 'Objective').trim().replace(/[.!?]+$/, '').toLowerCase();
+    return objective.endsWith(title);
+  });
+  for (const t of titleCopies) warnings.push(`${t.id}: Objective restates the title verbatim — replace with what is true after this task`);
   if (tasks.length < 4) return warnings;
   for (const name of ['Licensing requirements', 'Religious-data integrity requirements', 'Performance budget', 'Observability', 'Deployment', 'Rollback']) {
     const bodies = tasks.map((t) => sectionBody(t.text, name)).filter((body) => body.length >= 20);
@@ -587,8 +579,6 @@ function boilerplateWarnings(tasks) {
     const [body, count] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] ?? [];
     if (count / bodies.length > 0.7) warnings.push(`section "${name}" is identical across ${count}/${bodies.length} tasks (>70%)`);
   }
-  const titleCopies = tasks.filter((t) => t.title && sectionBody(t.text, 'Objective').toLowerCase() === t.title.trim().toLowerCase());
-  if (titleCopies.length / tasks.length > 0.7) warnings.push(`Objective restates title in ${titleCopies.length}/${tasks.length} tasks`);
   return warnings;
 }
 
@@ -673,7 +663,7 @@ function evidenceWarnings(cfg, task) {
   const warnings = [];
   if (cfg.expectedEnvironment) {
     const mismatches = contexts.flatMap((context) => expectedEnvironmentMismatches(cfg.expectedEnvironment, context));
-    if (mismatches.length && mismatches.length >= contexts.length) {
+    if (mismatches.length) {
       warnings.push(`Evidence runtime differs from expected environment: ${[...new Set(mismatches)].join('; ')}`);
     }
   }
@@ -735,8 +725,16 @@ function cmdNewTask(args) {
     if (!body.includes('## Status')) fail(`taskTemplate must contain a ## Status section: ${cfg.taskTemplate}`);
     if (!body.includes('## Dependencies')) fail(`taskTemplate must contain a ## Dependencies section: ${cfg.taskTemplate}`);
     if (!body.includes('## Acceptance criteria')) fail(`taskTemplate must contain a ## Acceptance criteria section: ${cfg.taskTemplate}`);
-    if (phaseArg !== undefined) body = replaceSectionText(body, 'Phase', phase) ?? body;
-    if (deps.length) body = replaceSectionText(body, 'Dependencies', depsBlock) ?? body;
+    if (phaseArg !== undefined) {
+      const updated = replaceSectionText(body, 'Phase', phase);
+      if (updated === null) fail(`taskTemplate must contain a ## Phase section when --phase is supplied: ${cfg.taskTemplate}`);
+      body = updated;
+    }
+    if (deps.length) {
+      const updated = replaceSectionText(body, 'Dependencies', depsBlock);
+      if (updated === null) fail(`taskTemplate must contain a ## Dependencies section when --dep is supplied: ${cfg.taskTemplate}`);
+      body = updated;
+    }
   } else {
     body = readFileSync(join(TEMPLATES, `TASK-${cfg.profile}.md`), 'utf8')
       .replaceAll('{{ID}}', id)
@@ -892,8 +890,10 @@ function cmdDone(args) {
   const map = byId(loadTasks(cfg));
   const t = map.get(id) ?? fail(`${id} not found`);
   if (t.status !== 'In Progress') fail(`${id} is not In Progress (status: ${t.status}) — claim it first`);
-  const unmet = t.deps.filter((d) => map.get(d)?.status !== 'Done');
+  const unmet = t.deps.filter((d) => !depSatisfied(map.get(d)));
   if (unmet.length) fail(`${id}: dependencies not Done: ${unmet.join(', ')}`);
+  const withdrawnDeps = t.deps.filter((d) => map.get(d)?.status === 'Withdrawn' || map.get(d)?.specificationStatus === 'Withdrawn');
+  if (withdrawnDeps.length) out(`warning: ${id}: dependencies Withdrawn: ${withdrawnDeps.join(', ')}`);
   if (cfg.profile !== 'lite') {
     const ev = t.sections['Evidence'] ?? '';
     if (!ev || ev === 'N/A') fail(`${id}: Evidence section is empty — record commands and observed results before done`);
@@ -903,8 +903,9 @@ function cmdDone(args) {
     const has = existsSync(evDir) && readdirSync(evDir).some((f) => f.startsWith(id));
     if (!has) fail(`${id}: strict profile requires an evidence record at ${cfg.evidenceDir}/${id}-<date>.md`);
   }
-  const evidenceWarningsList = evidenceWarnings(cfg, t);
-  for (const warning of evidenceWarningsList) out(`warning: ${id}: ${warning}`);
+  if (cfg.profile !== 'lite') {
+    for (const warning of evidenceWarnings(cfg, t)) out(`warning: ${id}: ${warning}`);
+  }
   cmdValidate([]);
   setSection(t, 'Status', 'Done');
   const scopePath = claimManifestPath(cfg, id);
@@ -1376,7 +1377,7 @@ function gitBranch(cfg) {
   return branch.status === 0 ? branch.stdout.trim() : null;
 }
 function defaultBranchRef(cfg) {
-  const branch = cfg.defaultBranch ?? 'main';
+  const branch = cfg.defaultBranch ?? cfg.baseBranch ?? 'main';
   const remote = cfg.remote ?? 'origin';
   for (const ref of [`refs/heads/${branch}`, `refs/remotes/${remote}/${branch}`]) {
     if (git(['show-ref', '--verify', '--quiet', ref], cfg.root, true).status === 0) return ref;
@@ -1391,6 +1392,15 @@ function changedLayerPaths(cfg, from, to) {
 function layerPathMatches(layer, files) {
   return files.some((file) => layer.paths.some((pattern) => globToRegExp(pattern).test(file)));
 }
+function rebaselineLayers(cfg) {
+  return REBASELINE_LAYERS.map((layer) => {
+    if (layer.id !== 'adrs-registers') return layer;
+    const adr = `${adrDirectoryPrefix(cfg)}**`;
+    const registers = (cfg.decisionFiles ?? ['tri/DECISIONS.md', 'tri/ASSUMPTIONS.md'])
+      .map((file) => { const p = file.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, ''); return /\.md$/i.test(p) ? p : `${p}/**`; });
+    return { ...layer, paths: [adr, ...registers] };
+  });
+}
 function cmdRebaseline(args) {
   const cfg = loadConfig();
   const path = rebaselinePath(cfg);
@@ -1401,7 +1411,8 @@ function cmdRebaseline(args) {
     fail(`rebaseline state is not valid JSON: ${e.message}`);
   }
   if (args.includes('--reset')) { rmSync(path, { force: true }); out('re-baseline reset'); return; }
-  const layer = REBASELINE_LAYERS[state.layer];
+  const layers = rebaselineLayers(cfg);
+  const layer = layers[state.layer];
   if (!layer) { out('re-baseline complete'); return; }
   const existingApproval = state.approvals.find((a) => a.layer === layer.id);
   if (args.includes('--approve')) {
@@ -1430,9 +1441,9 @@ function cmdRebaseline(args) {
     state.completed.push({ layer: layer.id, commit, changed });
     state.layer += 1;
     writeFileSync(path, JSON.stringify(state, null, 2) + '\n');
-    out(`re-baseline layer complete: ${layer.label}; next layer: ${REBASELINE_LAYERS[state.layer]?.label ?? 'none'}`); return;
+    out(`re-baseline layer complete: ${layer.label}; next layer: ${layers[state.layer]?.label ?? 'none'}`); return;
   }
-  out(`re-baseline layer ${state.layer + 1}/${REBASELINE_LAYERS.length}: ${layer.label}`);
+  out(`re-baseline layer ${state.layer + 1}/${layers.length}: ${layer.label}`);
   out(`paths: ${layer.paths.join(', ')}`);
   out('approve layer before editing; complete only after a clean commit reaches the configured default branch');
 }

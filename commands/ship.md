@@ -34,7 +34,7 @@ If a decision is not the user's to make either — legal, licensing, an appointm
 
 Write the answers into the artifacts, not into the conversation:
 
-- Task files: Objective, In/Out of scope, functional requirements, and **binary acceptance criteria**. If the project sets `taskTemplate`, every field that template requires must be filled.
+- Task files: Objective, In/Out of scope, functional requirements, and **binary acceptance criteria**. If the project sets `taskTemplate`, every field that template requires must be filled. A task generated with `## Specification status` `Unrevised` is promoted to `Specified` only when this run actually edited its Objective and Acceptance criteria; an untouched placeholder stays `Unrevised` and is reported as such at the gate.
 - `DECISIONS.md`: a `D-` entry for each resolved choice with its reasoning; a `B-` entry for each open one.
 - `ASSUMPTIONS.md`: consequential assumptions with what would invalidate them.
 - An ADR for any architectural decision — new dependency, service, boundary, or changed contract — **before** it can be implemented. If a task in scope needs one, it stays Blocked until that ADR is Accepted, and the run continues with the others.

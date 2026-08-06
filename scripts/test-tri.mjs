@@ -603,5 +603,96 @@ check('doctor accepts successor cited in task body outside Applicable ADRs', () 
   rmSync(origin, { recursive: true, force: true });
 });
 
+// --- post-2.1.0 hardening regressions ---
+check('a dependency on a Withdrawn task does not deadlock frontier or done', () => {
+  const p = join(ws, 'tri/tasks/phase-03/T-0009.md');
+  const orig = readFileSync(p, 'utf8');
+  writeFileSync(p, orig.replace('## Acceptance criteria', '## Evidence\n\n- follow-up verified against retained record\n\n## Acceptance criteria'));
+  assertIncludes(run(ws, ['next']), 'T-0009');
+  run(ws, ['claim', 'T-0009', '--by', 'dev-a']);
+  const out = run(ws, ['done', 'T-0009']);
+  assertIncludes(out, 'dependencies Withdrawn: T-0008');
+  assertIncludes(out, 'T-0009 marked Done');
+});
+
+check('validate flags a single placeholder objective instead of waiting for a majority', () => {
+  const w = mkdtempSync(join(tmpdir(), 'tri-title-'));
+  writeFileSync(join(w, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks' }));
+  const dir = join(w, 'tri/tasks/phase-01');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'T-0001.md'), '# T-0001: Fix the login bug\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Objective\n\nDeliver one independently verifiable increment that will Fix the login bug.\n\n## Acceptance criteria\n\n- logged in\n');
+  writeFileSync(join(dir, 'T-0002.md'), '# T-0002: Add regression tests\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Objective\n\nCover the login flow with regression tests.\n\n## Acceptance criteria\n\n- suite passes\n');
+  writeFileSync(join(dir, 'T-0003.md'), '# T-0003: Style the header\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Objective\n\nUnify header spacing and typography.\n\n## Acceptance criteria\n\n- consistent\n');
+  writeFileSync(join(dir, 'T-0004.md'), '# T-0004: Add dark mode\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Objective\n\nShip a dark colour scheme with contrast checks.\n\n## Acceptance criteria\n\n- contrast passes\n');
+  const out = run(w, ['validate']);
+  assertIncludes(out, 'T-0001: Objective restates the title verbatim');
+  assert(!out.includes('T-0002'), 'legitimate objective containing its title was flagged');
+});
+
+check('evidence from a mixture of environments warns about the mismatching run', () => {
+  const w = mkdtempSync(join(tmpdir(), 'tri-env-'));
+  writeFileSync(join(w, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks', expectedEnvironment: { node: 'v18' } }));
+  const dir = join(w, 'tri/tasks/phase-01');
+  mkdirSync(join(w, 'tri/evidence'), { recursive: true });
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'T-0001.md'), '# T-0001: Verify build\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Evidence\n\n- suite passes\n\n## Acceptance criteria\n\n- green\n');
+  writeFileSync(join(w, 'tri/evidence/T-0001-20260806.md'), '# Evidence: T-0001\n\n## Execution context (2026-08-06T00:00:00Z)\n\n```json\n{"command":["npm","test"],"context":{"node":"v18.21.3"}}\n```\n\n## Execution context (2026-08-06T00:00:01Z)\n\n```json\n{"command":["npm","test"],"context":{"node":"v24.0.0"}}\n```\n');
+  run(w, ['claim', 'T-0001', '--by', 'dev-a']);
+  const out = run(w, ['done', 'T-0001']);
+  assertIncludes(out, 'Evidence runtime differs from expected environment');
+  assertIncludes(out, 'T-0001 marked Done');
+});
+
+check('taskTemplate without a Phase section fails when --phase is supplied', () => {
+  const w = mkdtempSync(join(tmpdir(), 'tri-tpl-phase-'));
+  writeFileSync(join(w, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tasks', taskTemplate: 'tasks/TASK_TEMPLATE.md' }));
+  mkdirSync(join(w, 'tasks'), { recursive: true });
+  writeFileSync(join(w, 'tasks/TASK_TEMPLATE.md'), '# Task Template\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Acceptance criteria\n\n- \n');
+  const out = run(w, ['new-task', '--title', 'Phaseless task', '--phase', '02'], true);
+  assertIncludes(out, '## Phase');
+  assert(!existsSync(join(w, 'tasks/phase-02/T-0001.md')), 'task written despite template mismatch');
+});
+
+check('rebaseline honors baseBranch when defaultBranch is unset', () => {
+  const w = mkdtempSync(join(tmpdir(), 'tri-rebase-base-'));
+  initGit(w);
+  gitRun(w, ['checkout', '-b', 'dev']);
+  gitRun(w, ['commit', '--allow-empty', '-m', 'baseline']);
+  writeFileSync(join(w, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks', baseBranch: 'dev' }));
+  mkdirSync(join(w, 'tri/tasks'), { recursive: true });
+  gitRun(w, ['add', '.']);
+  gitRun(w, ['commit', '-m', 'config']);
+  run(w, ['rebaseline', '--approve']);
+  writeFileSync(join(w, 'PROJECT_CHARTER.md'), '# Charter\n\n- internal-only\n');
+  gitRun(w, ['add', '.']);
+  gitRun(w, ['commit', '-m', 'charter layer']);
+  const out = run(w, ['rebaseline', '--complete']);
+  assertIncludes(out, 'layer complete');
+  rmSync(w, { recursive: true, force: true });
+});
+
+check('rebaseline layer paths follow configured adrDir', () => {
+  const w = mkdtempSync(join(tmpdir(), 'tri-rebase-adrdir-'));
+  initGit(w);
+  gitRun(w, ['commit', '--allow-empty', '-m', 'baseline']);
+  writeFileSync(join(w, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks', adrDir: 'docs/adr', decisionFiles: ['docs/DECISIONS.md'] }));
+  mkdirSync(join(w, 'tri/tasks'), { recursive: true });
+  gitRun(w, ['add', '.']);
+  gitRun(w, ['commit', '-m', 'config']);
+  run(w, ['rebaseline', '--approve']);
+  writeFileSync(join(w, 'PROJECT_CHARTER.md'), '# Charter\n\n- internal-only\n');
+  gitRun(w, ['add', '.']);
+  gitRun(w, ['commit', '-m', 'charter layer']);
+  run(w, ['rebaseline', '--complete']);
+  run(w, ['rebaseline', '--approve']);
+  mkdirSync(join(w, 'docs/adr'), { recursive: true });
+  writeFileSync(join(w, 'docs/adr/ADR-0001.md'), '# ADR-0001: Keep internal\n\n- Status: Accepted\n');
+  gitRun(w, ['add', '.']);
+  gitRun(w, ['commit', '-m', 'adr layer']);
+  const out = run(w, ['rebaseline', '--complete']);
+  assertIncludes(out, 'layer complete');
+  rmSync(w, { recursive: true, force: true });
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
