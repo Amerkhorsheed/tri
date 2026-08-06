@@ -28,7 +28,56 @@ const ADR_ID_RE = /\b(ADR-\d+)\b/g;
 function fail(msg) { console.error(msg); process.exit(1); }
 function out(msg) { console.log(msg); }
 
-// ---------- config ----------
+function validateArgv(value, label) {
+  if (!Array.isArray(value) || !value.length || value.some((part) => typeof part !== 'string' || !part.trim())) {
+    fail(`${label} must be a non-empty argv array of non-empty strings`);
+  }
+  return value;
+}
+
+function validateRuntimeProbes(probes) {
+  if (!Array.isArray(probes)) fail('runtimeProbes must be an array of argv arrays or {command: argv} objects');
+  for (let i = 0; i < probes.length; i++) {
+    const probe = probes[i];
+    const command = Array.isArray(probe) ? probe : probe && typeof probe === 'object' ? probe.command : null;
+    validateArgv(command, `runtimeProbes[${i}]`);
+  }
+}
+
+function validateRepoRelativePath(value, label) {
+  if (typeof value !== 'string' || !value.trim() || value.startsWith('/') || value.split(/[\\/]+/).includes('..')) {
+    fail(`${label} must be a non-empty repository-relative path`);
+  }
+}
+
+function validateCompanionConfig(cfg) {
+  if (!Array.isArray(cfg.companionFiles)) fail('companionFiles must be an array of paths');
+  cfg.companionFiles.forEach((path, i) => validateRepoRelativePath(path, `companionFiles[${i}]`));
+  const raw = cfg.companions;
+  if (raw !== undefined && !Array.isArray(raw) && (!raw || typeof raw !== 'object')) {
+    fail('companions must be an array or object of configured companion entries');
+  }
+  if (Array.isArray(raw)) raw.forEach((entry, i) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) fail(`companions[${i}] must be an object`);
+    validateRepoRelativePath(entry.path, `companions[${i}].path`);
+    if (entry.strategy !== undefined && entry.strategy !== 'check') fail(`companions[${i}].strategy "${entry.strategy}" unsupported; use companionHooks for automation`);
+  });
+  if (raw && !Array.isArray(raw) && typeof raw === 'object') {
+    for (const [path, entry] of Object.entries(raw)) {
+      if (path === 'hooks') continue;
+      validateRepoRelativePath(path, `companions.${path}`);
+      if (entry !== undefined && (typeof entry !== 'object' || Array.isArray(entry))) fail(`companions.${path} must be an object`);
+      if (entry?.strategy !== undefined && entry.strategy !== 'check') fail(`companions.${path}.strategy "${entry.strategy}" unsupported; use companionHooks for automation`);
+    }
+  }
+  const hooks = { ...(cfg.companionHooks ?? {}), ...(raw && !Array.isArray(raw) ? (raw.hooks ?? {}) : {}) };
+  const events = new Set(['new-task', 'validate', 'done', 'companions-check']);
+  for (const [event, command] of Object.entries(hooks)) {
+    if (!events.has(event)) fail(`companion hook event "${event}" unsupported (use new-task, validate, done, companions-check)`);
+    validateArgv(Array.isArray(command) ? command : command?.command, `companionHooks.${event}`);
+  }
+}
+
 function findRoot(from = process.cwd()) {
   let dir = resolve(from);
   for (;;) {
@@ -48,13 +97,16 @@ function loadConfig() {
     fail(`tri.config.json is not valid JSON: ${e.message}`);
   }
   const statuses = [...new Set([...(cfg.statuses ?? STATUSES), 'Withdrawn'])];
-  return {
+  const merged = {
     root, idPrefix: 'T-', idWidth: 4, evidenceDir: 'tri/evidence',
     statuses, companionFiles: [], companions: [], companionHooks: {}, claimScope: {},
     adrDir: 'tri/adr', decisionFiles: ['tri/DECISIONS.md', 'tri/ASSUMPTIONS.md'],
     runtimeProbes: [], expectedEnvironment: null, ...cfg,
     statuses,
   };
+  validateRuntimeProbes(merged.runtimeProbes);
+  validateCompanionConfig(merged);
+  return merged;
 }
 
 function git(args, cwd, allowFailure = false) {
@@ -65,30 +117,52 @@ function git(args, cwd, allowFailure = false) {
   return result;
 }
 
+function remotePolicyConfigured(cfg) {
+  return cfg.requireRemoteReservations === true || cfg.remote !== undefined || cfg.defaultBranch !== undefined;
+}
+
 function gitRef(cfg) {
   // Identifier reservations compare against repository default branch, not PR target.
-  const branch = cfg.defaultBranch ?? cfg.baseBranch ?? 'main';
+  const branch = cfg.defaultBranch ?? 'main';
   const remote = cfg.remote ?? 'origin';
   return `${remote}/${branch}`;
 }
 
-function remoteRefs(cfg) {
+function remoteRefsResult(cfg) {
   const result = git(['for-each-ref', '--format=%(refname:short)', `refs/remotes/${cfg.remote ?? 'origin'}`], cfg.root, true);
-  if (result.status !== 0) return [];
-  return result.stdout.split(/\r?\n/).map((x) => x.trim())
-    .filter((x) => x && x !== `${cfg.remote ?? 'origin'}/HEAD`);
+  if (result.status !== 0 || result.error) {
+    return { ok: false, refs: [], reason: `cannot list remote refs: ${(result.error?.message || result.stderr || result.stdout || 'git failed').trim()}` };
+  }
+  return {
+    ok: true,
+    refs: result.stdout.split(/\r?\n/).map((x) => x.trim())
+      .filter((x) => x && x !== `${cfg.remote ?? 'origin'}/HEAD`),
+  };
 }
 
-function treeFiles(cfg, ref) {
+function remoteRefs(cfg) { return remoteRefsResult(cfg).refs; }
+
+function treeFilesResult(cfg, ref) {
   const result = git(['ls-tree', '-r', '--name-only', ref], cfg.root, true);
-  if (result.status !== 0) return [];
-  return result.stdout.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  if (result.status !== 0 || result.error) {
+    return { ok: false, files: [], reason: `cannot read ${ref}: ${(result.error?.message || result.stderr || result.stdout || 'git failed').trim()}` };
+  }
+  return { ok: true, files: result.stdout.split(/\r?\n/).map((x) => x.trim()).filter(Boolean) };
 }
 
-function showRefFile(cfg, ref, file) {
+function treeFiles(cfg, ref) { return treeFilesResult(cfg, ref).files; }
+
+function showRefFileResult(cfg, ref, file) {
   const result = git(['show', `${ref}:${file}`], cfg.root, true);
-  return result.status === 0 ? result.stdout : '';
+  if (result.status !== 0 || result.error) {
+    const missing = !result.error && result.status === 128 && /does not exist|exists on disk, but not in|path .* does not exist/i.test(result.stderr || '');
+    if (missing) return { ok: true, missing: true, text: '' };
+    return { ok: false, text: '', reason: `cannot read ${ref}:${file}: ${(result.error?.message || result.stderr || result.stdout || 'git failed').trim()}` };
+  }
+  return { ok: true, missing: false, text: result.stdout };
 }
+
+function showRefFile(cfg, ref, file) { return showRefFileResult(cfg, ref, file).text; }
 
 function definitionIdentifiers(cfg, file, text) {
   const ids = new Map();
@@ -122,31 +196,43 @@ function treeIdentifierMap(cfg, ref, files = treeFiles(cfg, ref)) {
 
 function refreshRemote(cfg) {
   const repository = git(['rev-parse', '--git-dir'], cfg.root, true);
-  if (repository.status !== 0) return false;
+  if (repository.status !== 0 || repository.error) return { configured: false, ok: true };
   const remote = cfg.remote ?? 'origin';
   const configured = git(['remote', 'get-url', remote], cfg.root, true);
-  if (configured.status !== 0) return false;
+  if (configured.status !== 0 || configured.error) {
+    if (remotePolicyConfigured(cfg)) fail(`configured remote ${remote} is unavailable`);
+    return { configured: false, ok: true };
+  }
   const result = git(['fetch', '--prune', remote], cfg.root, true);
-  if (result.status !== 0) fail(`git fetch --prune ${remote} failed: ${(result.stderr || result.stdout || '').trim()}`);
-  return true;
+  if (result.status !== 0 || result.error) {
+    fail(`git fetch --prune ${remote} failed: ${(result.error?.message || result.stderr || result.stdout || 'git failed').trim()}`);
+  }
+  return { configured: true, ok: true };
 }
 
 function remoteIdentifierInventory(cfg) {
   const baseRef = gitRef(cfg);
-  const baseFiles = treeFiles(cfg, baseRef);
-  if (!baseFiles.length) return { available: false, baseRef, branches: [], reserved: new Map(), collisions: [] };
+  const baseTree = treeFilesResult(cfg, baseRef);
+  if (!baseTree.ok) return { available: false, baseRef, reason: baseTree.reason, branches: [], reserved: new Map(), collisions: [] };
+  const refs = remoteRefsResult(cfg);
+  if (!refs.ok) return { available: false, baseRef, reason: refs.reason, branches: [], reserved: new Map(), collisions: [] };
   const branches = [];
-  for (const ref of remoteRefs(cfg)) {
+  for (const ref of refs.refs) {
     if (ref === baseRef) continue;
     const changed = git(['diff', '--name-only', `${baseRef}...${ref}`], cfg.root, true);
-    if (changed.status !== 0) continue;
+    if (changed.status !== 0 || changed.error) {
+      return { available: false, baseRef, reason: `cannot compare ${ref} with ${baseRef}: ${(changed.error?.message || changed.stderr || changed.stdout || 'git failed').trim()}`, branches, reserved: new Map(), collisions: [] };
+    }
     const files = changed.stdout.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
     const ids = new Map();
     for (const file of files) {
-      const text = showRefFile(cfg, ref, file);
-      const baseText = showRefFile(cfg, baseRef, file);
-      const baseDefinitions = definitionIdentifiers(cfg, file, baseText);
-      for (const [id, location] of definitionIdentifiers(cfg, file, text)) {
+      const text = showRefFileResult(cfg, ref, file);
+      const baseText = showRefFileResult(cfg, baseRef, file);
+      if (!text.ok || !baseText.ok) {
+        return { available: false, baseRef, reason: (!text.ok ? text.reason : baseText.reason), branches, reserved: new Map(), collisions: [] };
+      }
+      const baseDefinitions = definitionIdentifiers(cfg, file, baseText.text);
+      for (const [id, location] of definitionIdentifiers(cfg, file, text.text)) {
         if (!baseDefinitions.has(id)) ids.set(id, { id, ref, branch: ref, file, location });
       }
     }
@@ -160,6 +246,12 @@ function remoteIdentifierInventory(cfg) {
   const collisions = [...reserved.entries()].filter(([, owners]) => owners.length > 1)
     .map(([id, owners]) => ({ id, owners }));
   return { available: true, baseRef, branches, reserved, collisions };
+}
+
+function requireRemoteInventory(cfg, purpose) {
+  const inventory = remoteIdentifierInventory(cfg);
+  if (!inventory.available) fail(`${purpose} requires remote identifier inventory: ${inventory.reason}`);
+  return inventory;
 }
 
 function localIdentifierMap(cfg, tasks = loadTasks(cfg)) {
@@ -193,6 +285,8 @@ function numericIdSet(cfg, prefix, tasks = loadTasks(cfg)) {
   if (remote.available) for (const id of remote.reserved.keys()) {
     const match = id.match(re);
     if (match) values.add(Number(match[1]));
+  } else if (remotePolicyConfigured(cfg)) {
+    fail(`identifier allocation requires remote inventory: ${remote.reason}`);
   }
   return values;
 }
@@ -203,7 +297,8 @@ function runCompanionHook(cfg, event, details = {}) {
   const command = Array.isArray(configured) ? configured : configured.command;
   if (!Array.isArray(command) || !command.length) fail(`companion hook ${event} must be a non-empty argv array`);
   const result = spawnSync(command[0], [...command.slice(1), event, JSON.stringify(details)], { cwd: cfg.root, encoding: 'utf8' });
-  if (result.status !== 0) fail(`companion hook ${event} failed: ${(result.stderr || result.stdout || '').trim()}`);
+  if (result.error) fail(`companion hook ${event} failed to start: ${result.error.message}`);
+  if (result.status !== 0 || result.signal) fail(`companion hook ${event} failed${result.signal ? ` with signal ${result.signal}` : ''}: ${(result.stderr || result.stdout || '').trim()}`);
   if (result.stdout.trim()) out(`companion hook ${event}: ${result.stdout.trim()}`);
 }
 
@@ -492,7 +587,14 @@ function boilerplateWarnings(tasks) {
 }
 
 function runtimeValue(command, cwd) {
-  const result = spawnSync(command[0], command.slice(1), { cwd, encoding: 'utf8' });
+  validateArgv(command, 'runtime probe command');
+  let result;
+  try { result = spawnSync(command[0], command.slice(1), { cwd, encoding: 'utf8' }); }
+  catch (error) { fail(`runtime probe ${command.join(' ')} failed to start: ${error.message}`); }
+  if (result.error) fail(`runtime probe ${command.join(' ')} failed to start: ${result.error.message}`);
+  if (result.status !== 0 || result.signal) {
+    fail(`runtime probe ${command.join(' ')} failed${result.signal ? ` with signal ${result.signal}` : ` with exit status ${result.status}`}: ${(result.stderr || result.stdout || '').trim()}`);
+  }
   return { command, status: result.status, output: (result.stdout || result.stderr || '').trim().split(/\r?\n/)[0] };
 }
 
@@ -603,37 +705,32 @@ function cmdNewTask(args) {
   const cfg = loadConfig();
   refreshRemote(cfg);
   const title = argValue(args, '--title') ?? fail('--title required');
-  const phase = argValue(args, '--phase') ?? '01';
+  const phaseArg = argValue(args, '--phase');
+  const phase = phaseArg ?? '01';
   const deps = argValues(args, '--dep');
   const tasks = loadTasks(cfg);
   const id = nextNumericId(cfg, cfg.idPrefix, tasks);
   const dir = resolvePhaseDir(cfg, phase);
   mkdirSync(dir, { recursive: true });
-  // A project may own its task template; its fields are the contract its
-  // validators enforce, so tri's own template must not overwrite them.
   const depsBlock = deps.length ? deps.map((d) => `- ${d}`).join('\n') : 'N/A';
   let body;
   if (cfg.taskTemplate) {
     const tplPath = join(cfg.root, cfg.taskTemplate);
     if (!existsSync(tplPath)) fail(`taskTemplate not found: ${cfg.taskTemplate}`);
-    body = readFileSync(tplPath, 'utf8').replace(/\r\n/g, '\n');
-    // Drop any leading prose above the first field so the result is a task, not a template.
-    const firstField = body.indexOf('## ');
-    if (firstField > 0) body = body.slice(firstField);
+    body = readFileSync(tplPath, 'utf8');
     body = body
       .replace(new RegExp(`${cfg.idPrefix.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')}N+`, 'g'), id)
       .replaceAll('{{ID}}', id)
       .replaceAll('{{TITLE}}', title)
       .replaceAll('{{PHASE}}', phase)
       .replaceAll('{{DEPS}}', depsBlock);
-    body = `# ${id}: ${title}\n\n${body}`;
+    if (!/^#\s+/.test(body)) body = `# ${id}: ${title}\n\n${body}`;
+    else body = body.replace(/^#\s+.*$/m, `# ${id}: ${title}`);
     if (!body.includes('## Status')) fail(`taskTemplate must contain a ## Status section: ${cfg.taskTemplate}`);
     if (!body.includes('## Dependencies')) fail(`taskTemplate must contain a ## Dependencies section: ${cfg.taskTemplate}`);
     if (!body.includes('## Acceptance criteria')) fail(`taskTemplate must contain a ## Acceptance criteria section: ${cfg.taskTemplate}`);
-    body = replaceSectionText(body, 'Status', 'Planned') ?? body;
-    body = replaceSectionText(body, 'Phase', phase) ?? body;
-    body = replaceSectionText(body, 'Dependencies', depsBlock) ?? body;
-    if (body.includes('## Specification status')) body = replaceSectionText(body, 'Specification status', 'Unrevised') ?? body;
+    if (phaseArg !== undefined) body = replaceSectionText(body, 'Phase', phase) ?? body;
+    if (deps.length) body = replaceSectionText(body, 'Dependencies', depsBlock) ?? body;
   } else {
     body = readFileSync(join(TEMPLATES, `TASK-${cfg.profile}.md`), 'utf8')
       .replaceAll('{{ID}}', id)
@@ -681,13 +778,13 @@ function cmdValidate(args = []) {
     const scope = validateClaimScope(cfg, readClaimManifest(file), tasks, file);
     for (const path of scope.forbiddenPaths) if (scope.writePaths.some((p) => pathMatches(p, [path]))) fail(`claim scope ${file}: writePaths includes forbidden path ${path}`);
   }
-  const remote = remoteIdentifierInventory(cfg);
-  if (remote.available && remote.collisions.length) {
-    const message = `remote identifier collisions: ${remote.collisions.map((c) => c.id).join(', ')}; keep both entries and renumber incoming entries to next free identifiers during resolution`;
+  const inventory = remoteIdentifierInventory(cfg);
+  if (args.includes('--remote') && !inventory.available) errors.push(`remote validation unavailable: ${inventory.reason}`);
+  if (inventory.available && inventory.collisions.length) {
+    const message = `remote identifier collisions: ${inventory.collisions.map((c) => c.id).join(', ')}; keep both entries and renumber incoming entries to next free identifiers during resolution`;
     (args.includes('--remote') ? errors : warnings).push(message);
   }
   warnings.push(...boilerplateWarnings(tasks));
-  if (args.includes('--remote') && !remote.available) warnings.push(`remote validation unavailable: default ref ${remote.baseRef} is not fetched`);
   for (const t of tasks) {
     if (!SPECIFICATION_STATUSES.includes(t.specificationStatus)) warnings.push(`${t.id}: unknown Specification status "${t.specificationStatus}" (expected ${SPECIFICATION_STATUSES.join(', ')})`);
     if (t.specificationStatus === 'Unrevised') warnings.push(`${t.id}: specification is Unrevised; run clarify before claiming`);
@@ -1055,7 +1152,7 @@ function cmdSync() {
   const cfg = loadConfig();
   refreshRemote(cfg);
   const remote = cfg.remote ?? 'origin';
-  const inventory = remoteIdentifierInventory(cfg);
+  const inventory = requireRemoteInventory(cfg, 'sync');
   out(`synced ${remote}; scanned ${inventory.branches.length} remote branch(es), ${inventory.reserved.size} allocated identifier(s)`);
   if (inventory.collisions.length) out(`warning: collisions: ${inventory.collisions.map((c) => c.id).join(', ')}`);
 }
@@ -1066,9 +1163,13 @@ function cmdEvidence(args) {
   const separator = args.indexOf('--');
   if (separator < 0 || separator === args.length - 1) fail('usage: evidence ID -- command [args...]');
   const command = args.slice(separator + 1);
+  validateArgv(command, 'evidence command');
   const started = Date.now();
-  const result = spawnSync(command[0], command.slice(1), { cwd: cfg.root, encoding: 'utf8' });
-  const observed = { exitStatus: result.status, output: `${result.stdout || ''}${result.stderr || ''}`.trim(), durationMs: Date.now() - started };
+  let result;
+  try { result = spawnSync(command[0], command.slice(1), { cwd: cfg.root, encoding: 'utf8' }); }
+  catch (error) { fail(`evidence command failed to start: ${error.message}`); }
+  const observed = { exitStatus: result.status, signal: result.signal ?? null, error: result.error?.message ?? null, output: `${result.stdout || ''}${result.stderr || ''}`.trim(), durationMs: Date.now() - started };
+  if (result.error) fail(`evidence command failed to start: ${result.error.message}`);
   const path = appendEvidenceContext(cfg, id, command, observed);
   out(`evidence captured for ${id}: ${path}`);
   if (observed.output) out(observed.output);

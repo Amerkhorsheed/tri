@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.0 — 2026-08-06
+
+- Hardened remote identifier inventory to fail closed when configured refs, fetches, or branch comparisons are unavailable.
+- Preserved configured task-template fields unless explicit CLI options own them; malformed runtime probes and unsupported companion strategies now fail clearly.
+- Hardened evidence and companion subprocess failure reporting.
+
 ## 2.2.0 — 2026-08-06
 
 - Added collision-safe remote identifier reservations, `sync`, and `validate --remote` for task, ADR, and register identifiers.

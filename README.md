@@ -121,13 +121,14 @@ tri reads foreign task formats through config instead of rewriting files. Exampl
   "decisionFiles": ["tri/DECISIONS.md", "tri/ASSUMPTIONS.md"],
   "runtimeProbes": [["php", "--version"]],
   "expectedEnvironment": {"node": "v24"},
+  "requireRemoteReservations": true,
   "claimScope": {"directory": ".tri/claims", "responsibilities": ["admin"]},
   "defaultBranch": "main",
   "baseBranch": "dev"
 }
 ```
 
-`taskTemplate` makes `new-task` write the project's own template and fails if required sections are missing. `companionFiles` remains a legacy check-only list; `companions` adds per-file strategies, while `companionHooks` uses argv arrays after `new-task`, `done`, `validate`, or `companions --check`. `runtimeProbes` and `expectedEnvironment` make evidence show declared runtime context; `sync` fetches remote branches and reserves identifiers not yet on the default branch. `doctor` reports dangling ADR references and remote collisions as warnings. `Withdrawn` remains in registers but never enters frontier. `Specification status` defaults old tasks to `Specified`; generated tasks start `Unrevised`.
+`taskTemplate` makes `new-task` write the project's own template and fails if required sections are missing; TRI preserves template-owned fields and only replaces Phase/Dependencies when corresponding CLI options are supplied. `companionFiles` remains a legacy check-only list; `companions` supports path checks with strategy `check`, while unsupported strategies must use hooks. `companionHooks` uses argv arrays after `new-task`, `done`, `validate`, or `companions --check`. `runtimeProbes` and `expectedEnvironment` make evidence show declared runtime context; malformed probes and failed probes stop evidence capture. `sync` fetches remote branches and reserves identifiers not yet on the default branch; configured remote reservation failures stop allocation. `doctor` reports dangling ADR references and remote collisions as warnings. `Withdrawn` remains in registers but never enters frontier. `Specification status` defaults old tasks to `Specified`; generated tasks start `Unrevised`.
 
 When creating a task, `--phase NN` targets `phase-NN`. If an existing task tree has exactly one suffixed directory such as `phase-12-mobile`, tri reuses it; `--phase NN-label` targets that exact label. Multiple suffixed matches, or a canonical directory alongside a suffixed match, fail instead of choosing silently. A phase with no match gets the canonical `phase-NN` directory.
 
