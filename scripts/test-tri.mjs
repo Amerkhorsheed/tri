@@ -694,5 +694,29 @@ check('rebaseline layer paths follow configured adrDir', () => {
   rmSync(w, { recursive: true, force: true });
 });
 
+check('run-state refuses an unknown execution mode', () => {
+  const out = run(ws4, ['run-state', '--start', 'phase 01', '--mode', 'spaceships', '--queue', 'T-0001', '--allow-unrevised'], true);
+  assertIncludes(out, 'unknown run mode');
+});
+
+check('run-state warns on overlapping Expected files in parallel and team modes', () => {
+  const w = mkdtempSync(join(tmpdir(), 'tri-overlap-'));
+  writeFileSync(join(w, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks' }));
+  const dir = join(w, 'tri/tasks/phase-01');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'T-0001.md'), '# T-0001: Button styling\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Expected files\n\n- src/components/Button.tsx\n\n## Acceptance criteria\n\n- styled\n');
+  writeFileSync(join(dir, 'T-0002.md'), '# T-0002: Button behavior\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Expected files\n\n- src/components/Button.tsx\n\n## Acceptance criteria\n\n- behaves\n');
+  writeFileSync(join(dir, 'T-0003.md'), '# T-0003: Header layout\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Expected files\n\n- src/components/Header.tsx\n\n## Acceptance criteria\n\n- laid out\n');
+  const parallel = run(w, ['run-state', '--start', 'phase 01', '--mode', 'parallel', '--queue', 'T-0001,T-0002,T-0003']);
+  assertIncludes(parallel, 'T-0001 and T-0002 both touch src/components/Button.tsx');
+  assert(!parallel.includes('Header.tsx'), 'disjoint task pair was flagged');
+  run(w, ['run-state', '--finish']);
+  const team = run(w, ['run-state', '--start', 'phase 01', '--mode', 'team', '--queue', 'T-0001,T-0002,T-0003']);
+  assertIncludes(team, 'both touch');
+  run(w, ['run-state', '--finish']);
+  const sequential = run(w, ['run-state', '--start', 'phase 01', '--mode', 'sequential', '--queue', 'T-0001,T-0002,T-0003']);
+  assert(!sequential.toLowerCase().includes('both touch'), 'sequential run flagged for overlap');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
