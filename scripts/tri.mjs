@@ -23,7 +23,7 @@ const REBASELINE_LAYERS = [
   { id: 'tasks', label: 'tasks', paths: ['tri/tasks/**', 'tasks/**'] },
 ];
 const REGISTER_ID_RE = /\b([DBA]-\d+)\b/g;
-const ADR_ID_RE = /\b(ADR-\d+)\b/g;
+const ADR_ID_RE = /\b(ADR-\d+)\b/gi;
 
 function fail(msg) { console.error(msg); process.exit(1); }
 function out(msg) { console.log(msg); }
@@ -1213,37 +1213,75 @@ function parseAdrDocument(file, text) {
   const fileMatch = basename(file).match(/^(ADR-\d+)(?:[-_].*)?\.md$/i);
   if (!fileMatch || /ADR-template\.md$/i.test(file)) return { ok: false, reason: 'not a canonical ADR file' };
   const id = fileMatch[1].toUpperCase();
-  const headings = [...text.matchAll(/^#\s+(ADR-\d+)\s*:/gmi)].map((match) => match[1].toUpperCase());
-  if (headings.length !== 1 || headings[0] !== id) return { ok: false, id, reason: `filename/header mismatch (expected exactly one # ${id}: heading)` };
-  const statusMatch = text.match(/^\s*-\s*Status:\s*(.+?)\s*$/mi);
-  if (!statusMatch) return { ok: false, id, reason: 'missing Status field' };
-  const statusText = statusMatch[1].trim();
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  let fenced = false;
+  let frontmatter = false;
+  const content = [];
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (index === 0 && /^---[ \t]*$/.test(line)) { frontmatter = true; continue; }
+    if (frontmatter) { if (/^---[ \t]*$/.test(line)) frontmatter = false; continue; }
+    if (/^[ \t]*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
+    if (!fenced) content.push(line);
+  }
+  const headings = content.filter((line) => /^#[ \t]+ADR-\d+[ \t]*:[ \t]*\S/.test(line));
+  const allH1 = content.filter((line) => /^#[ \t]+/.test(line));
+  if (allH1.length !== 1 || headings.length !== 1 || !new RegExp(`^#[ \\t]+${id.replace('-', '\\-')}[ \\t]*:[ \\t]*\\S`, 'i').test(headings[0])) {
+    return { ok: false, id, reason: `filename/header mismatch (expected exactly one # ${id}: heading)` };
+  }
+  const statusLines = content.filter((line) => /^-[ \t]+Status:[ \t]*\S/.test(line));
+  if (statusLines.length !== 1) return { ok: false, id, reason: statusLines.length ? 'duplicate Status fields' : 'missing Status field' };
+  const statusText = statusLines[0].replace(/^[ \t]*-[ \t]+Status:[ \t]*/, '').trim();
   if (/^(?:Proposed|Accepted)$/i.test(statusText)) {
     return { ok: true, id, file, text, status: statusText, successor: null };
   }
-  const superseded = statusText.match(/^Superseded\s+by\s+(?:(ADR-\d+)|\[(ADR-\d+)\]\([^)]*\))$/i);
+  const superseded = statusText.match(/^Superseded[ \t]+by[ \t]+(?:(ADR-\d+)|\[(ADR-\d+)\]\([^)]*\))$/i);
   if (!superseded) return { ok: false, id, reason: `unsupported Status value "${statusText}"` };
   return { ok: true, id, file, text, status: 'Superseded', successor: (superseded[1] ?? superseded[2]).toUpperCase() };
 }
 
+function adrDirectoryPrefix(cfg) {
+  const path = cfg.adrDir.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+  return path ? `${path}/` : '';
+}
+
+function isAdrPath(cfg, file) {
+  const normalized = file.replace(/\\/g, '/').replace(/^\.\//, '');
+  return normalized.startsWith(adrDirectoryPrefix(cfg)) && /(?:^|\/)ADR-\d+(?:[-_].*)?\.md$/i.test(normalized);
+}
+
 function adrMap(cfg, base, files, warnings = []) {
   const map = new Map();
+  const malformed = new Map();
   for (const file of files) {
     const content = showRefFileResult(cfg, base, file);
     if (!content.ok) { warnings.push(`cannot inspect ADR ${file} on ${base}: ${content.reason}`); continue; }
     const parsed = parseAdrDocument(file, content.text);
-    if (!parsed.ok) { warnings.push(`${file}: malformed ADR: ${parsed.reason}`); continue; }
-    if (map.has(parsed.id)) warnings.push(`duplicate ADR definition ${parsed.id}: ${map.get(parsed.id).file} and ${file}`);
-    else map.set(parsed.id, parsed);
+    if (!parsed.ok) {
+      const id = parsed.id ?? basename(file).match(/^(ADR-\d+)/i)?.[1]?.toUpperCase();
+      if (id) malformed.set(id, { file, reason: parsed.reason });
+      warnings.push(`${file}: malformed ADR: ${parsed.reason}`);
+      continue;
+    }
+    if (map.has(parsed.id) || malformed.has(parsed.id)) {
+      const prior = map.get(parsed.id)?.file ?? malformed.get(parsed.id)?.file;
+      map.delete(parsed.id);
+      malformed.set(parsed.id, { file: `${prior}, ${file}`, reason: 'duplicate ADR definition' });
+      warnings.push(`duplicate ADR definition ${parsed.id}: ${prior} and ${file}`);
+    } else map.set(parsed.id, parsed);
   }
-  return map;
+  return { map, malformed };
 }
 
 function taskAdrCitations(task) {
-  const applicable = task.sections['Applicable ADRs'] ?? '';
-  const scoped = [...applicable.matchAll(ADR_ID_RE)].map((match) => match[1].toUpperCase());
-  const source = scoped.length ? applicable : task.text;
-  return [...new Set([...source.matchAll(ADR_ID_RE)].map((match) => match[1].toUpperCase()))];
+  const lines = task.text.replace(/\r\n?/g, '\n').split('\n');
+  let fenced = false;
+  const visible = [];
+  for (const line of lines) {
+    if (/^[ \t]*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
+    if (!fenced) visible.push(line.replace(/`[^`]*`/g, ''));
+  }
+  return [...new Set([...visible.join('\n').matchAll(ADR_ID_RE)].map((match) => match[1].toUpperCase()))];
 }
 
 function cmdDoctor() {
@@ -1253,25 +1291,40 @@ function cmdDoctor() {
   const baseTree = treeFilesResult(cfg, base);
   const remote = remoteIdentifierInventory(cfg);
   let adrs = new Map();
+  let malformedAdrs = new Map();
   let authoritativeAdrs = false;
   if (!baseTree.ok) {
     warnings.push(`default branch ${base} unavailable; skipped authoritative ADR checks: ${baseTree.reason}`);
   } else {
     authoritativeAdrs = true;
-    const knownAdrs = baseTree.files.filter((p) => /(?:^|\/)ADR-\d+.*\.md$/i.test(p));
-    adrs = adrMap(cfg, base, knownAdrs, warnings);
+    const knownAdrs = baseTree.files.filter((p) => isAdrPath(cfg, p));
+    const parsedAdrs = adrMap(cfg, base, knownAdrs, warnings);
+    adrs = parsedAdrs.map;
+    malformedAdrs = parsedAdrs.malformed;
   }
   const tasks = loadTasks(cfg);
 
   if (authoritativeAdrs) {
     const stale = new Map();
+    const graphWarnings = new Set();
+    for (const [id, adr] of adrs) {
+      if (!adr.successor) continue;
+      if (adr.successor === id) graphWarnings.add(`${id}: supersession points to itself`);
+      else if (!adrs.has(adr.successor)) graphWarnings.add(`${id}: supersedes missing or malformed ${adr.successor}`);
+      else if (adrs.get(adr.successor).status === 'Superseded' && adrs.get(adr.successor).successor === id) graphWarnings.add(`${id}: supersession cycle with ${adr.successor}`);
+    }
+    for (const warning of graphWarnings) warnings.push(warning);
     for (const task of tasks) {
       const citations = taskAdrCitations(task);
       for (const id of citations) {
         const adr = adrs.get(id);
         if (!adr) {
-          const remoteOwner = remote.reserved.get(id)?.[0];
-          warnings.push(`${task.id}: references ${id}, absent from default branch${remoteOwner ? ` (present on ${remoteOwner.ref})` : ''}`);
+          if (malformedAdrs.has(id)) {
+            warnings.push(`${task.id}: references malformed ${id}`);
+          } else {
+            const remoteOwner = remote.reserved.get(id)?.[0];
+            warnings.push(`${task.id}: references ${id}, absent from default branch${remoteOwner ? ` (present on ${remoteOwner.ref})` : ''}`);
+          }
           continue;
         }
         if (adr.successor && !citations.includes(adr.successor)) {

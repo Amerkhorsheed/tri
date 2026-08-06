@@ -564,5 +564,44 @@ check('doctor parses canonical ADR status and consolidates stale task citations'
   rmSync(origin, { recursive: true, force: true });
 });
 
+check('doctor rejects malformed ADR metadata without calling it absent', () => {
+  const doctorWs = mkdtempSync(join(tmpdir(), 'tri-doctor-malformed-'));
+  initGit(doctorWs);
+  run(doctorWs, ['init', '--profile', 'standard', '--yes']);
+  writeFileSync(join(doctorWs, 'tri/adr/ADR-0001.md'), '# ADR-0001\n\n```\n- Status: Accepted\n```\n\n- Status: Accepted\n');
+  const taskDir = join(doctorWs, 'tri/tasks/phase-01');
+  mkdirSync(taskDir, { recursive: true });
+  writeFileSync(join(taskDir, 'T-0001.md'), '# T-0001: Uses malformed ADR\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Applicable ADRs\n\n- ADR-0001\n\n## Acceptance criteria\n\n- detect malformed ADR\n');
+  gitRun(doctorWs, ['add', '.']);
+  gitRun(doctorWs, ['commit', '-m', 'malformed doctor fixture']);
+  const origin = addOrigin(doctorWs);
+  gitRun(doctorWs, ['push', 'origin', 'main']);
+  const out = run(doctorWs, ['doctor']);
+  assertIncludes(out, 'malformed ADR');
+  assertIncludes(out, 'references malformed ADR-0001');
+  assert(!out.includes('ADR-0001, absent from default branch'), 'malformed ADR was misreported absent');
+  rmSync(doctorWs, { recursive: true, force: true });
+  rmSync(origin, { recursive: true, force: true });
+});
+
+check('doctor accepts successor cited in task body outside Applicable ADRs', () => {
+  const doctorWs = mkdtempSync(join(tmpdir(), 'tri-doctor-body-'));
+  initGit(doctorWs);
+  run(doctorWs, ['init', '--profile', 'standard', '--yes']);
+  writeFileSync(join(doctorWs, 'tri/adr/ADR-0001.md'), '# ADR-0001: Old decision\n\n- Status: Superseded by ADR-0002\n');
+  writeFileSync(join(doctorWs, 'tri/adr/ADR-0002.md'), '# ADR-0002: New decision\n\n- Status: Accepted\n');
+  const taskDir = join(doctorWs, 'tri/tasks/phase-01');
+  mkdirSync(taskDir, { recursive: true });
+  writeFileSync(join(taskDir, 'T-0001.md'), '# T-0001: Migrated\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Applicable ADRs\n\n- ADR-0001\n\n## Context\n\nMigration follows ADR-0002.\n\n## Acceptance criteria\n\n- migrated\n');
+  gitRun(doctorWs, ['add', '.']);
+  gitRun(doctorWs, ['commit', '-m', 'body citation fixture']);
+  const origin = addOrigin(doctorWs);
+  gitRun(doctorWs, ['push', 'origin', 'main']);
+  const out = run(doctorWs, ['doctor']);
+  assert(!out.includes('without successor'), `body successor was ignored:\n${out}`);
+  rmSync(doctorWs, { recursive: true, force: true });
+  rmSync(origin, { recursive: true, force: true });
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
