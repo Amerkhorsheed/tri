@@ -5,6 +5,7 @@
 - Hardened remote identifier inventory to fail closed when configured refs, fetches, or branch comparisons are unavailable.
 - Preserved configured task-template fields unless explicit CLI options own them; malformed runtime probes and unsupported companion strategies now fail clearly.
 - Hardened evidence and companion subprocess failure reporting.
+- Added Git-backed regression coverage for remote reservation failures/collisions and canonical doctor ADR checks.
 
 ## 2.2.0 — 2026-08-06
 

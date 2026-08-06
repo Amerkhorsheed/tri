@@ -22,6 +22,23 @@ function run(cwd, args, expectFail = false) {
   }
 }
 
+function gitRun(cwd, args) {
+  return execFileSync('git', args, { cwd, encoding: 'utf8' });
+}
+
+function initGit(cwd) {
+  gitRun(cwd, ['init', '-b', 'main']);
+  gitRun(cwd, ['config', 'user.email', 'tri-test@example.com']);
+  gitRun(cwd, ['config', 'user.name', 'tri test']);
+}
+
+function addOrigin(cwd) {
+  const bare = mkdtempSync(join(tmpdir(), 'tri-origin-'));
+  execFileSync('git', ['init', '--bare', bare], { encoding: 'utf8' });
+  gitRun(cwd, ['remote', 'add', 'origin', bare]);
+  return bare;
+}
+
 function check(name, fn) {
   try { fn(); passed++; console.log(`  ok - ${name}`); }
   catch (e) { failed++; console.log(`  FAIL - ${name}\n    ${e.message.split('\n').join('\n    ')}`); }
@@ -447,6 +464,104 @@ check('run-state records a batch and survives to be resumed', () => {
 check('run-state reports no active run when none exists', () => {
   const out = run(ws, ['run-state']);
   assert(/no active run/i.test(out), `expected no-active-run message:\n${out}`);
+});
+
+// --- remote inventory and canonical doctor fixtures ---
+check('configured remote allocation fails when default ref is missing', () => {
+  const remoteWs = mkdtempSync(join(tmpdir(), 'tri-remote-missing-'));
+  initGit(remoteWs);
+  addOrigin(remoteWs);
+  writeFileSync(join(remoteWs, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks', requireRemoteReservations: true }));
+  mkdirSync(join(remoteWs, 'tri/tasks'), { recursive: true });
+  const out = run(remoteWs, ['new-task', '--title', 'Blocked allocation', '--phase', '01'], true);
+  assert(/origin\/main|remote inventory/i.test(out), `missing default ref was not reported:\n${out}`);
+  rmSync(remoteWs, { recursive: true, force: true });
+});
+
+check('configured remote fetch failure stops allocation', () => {
+  const remoteWs = mkdtempSync(join(tmpdir(), 'tri-remote-fetch-'));
+  initGit(remoteWs);
+  gitRun(remoteWs, ['remote', 'add', 'origin', join(remoteWs, 'missing-origin.git')]);
+  writeFileSync(join(remoteWs, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks', requireRemoteReservations: true }));
+  mkdirSync(join(remoteWs, 'tri/tasks'), { recursive: true });
+  const out = run(remoteWs, ['new-task', '--title', 'Blocked fetch', '--phase', '01'], true);
+  assert(/git fetch|failed/i.test(out), `fetch failure was not reported:\n${out}`);
+  rmSync(remoteWs, { recursive: true, force: true });
+});
+
+check('valid empty default tree remains usable for allocation', () => {
+  const remoteWs = mkdtempSync(join(tmpdir(), 'tri-remote-empty-'));
+  initGit(remoteWs);
+  gitRun(remoteWs, ['commit', '--allow-empty', '-m', 'empty baseline']);
+  const origin = addOrigin(remoteWs);
+  gitRun(remoteWs, ['push', 'origin', 'main']);
+  writeFileSync(join(remoteWs, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks' }));
+  mkdirSync(join(remoteWs, 'tri/tasks'), { recursive: true });
+  const out = run(remoteWs, ['new-task', '--title', 'Empty baseline allocation', '--phase', '01']);
+  assertIncludes(out, 'T-0001');
+  rmSync(remoteWs, { recursive: true, force: true });
+  rmSync(origin, { recursive: true, force: true });
+});
+
+check('explicit baseBranch selects configured remote baseline', () => {
+  const remoteWs = mkdtempSync(join(tmpdir(), 'tri-remote-base-'));
+  initGit(remoteWs);
+  gitRun(remoteWs, ['checkout', '-b', 'dev']);
+  gitRun(remoteWs, ['commit', '--allow-empty', '-m', 'development baseline']);
+  const origin = addOrigin(remoteWs);
+  gitRun(remoteWs, ['push', 'origin', 'dev']);
+  writeFileSync(join(remoteWs, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks', baseBranch: 'dev' }));
+  mkdirSync(join(remoteWs, 'tri/tasks'), { recursive: true });
+  const out = run(remoteWs, ['new-task', '--title', 'Development allocation', '--phase', '01']);
+  assertIncludes(out, 'T-0001');
+  rmSync(remoteWs, { recursive: true, force: true });
+  rmSync(origin, { recursive: true, force: true });
+});
+
+check('remote branches reserve identifiers and collisions fail remote validation', () => {
+  const remoteWs = mkdtempSync(join(tmpdir(), 'tri-remote-reserved-'));
+  initGit(remoteWs);
+  run(remoteWs, ['init', '--profile', 'standard', '--yes']);
+  gitRun(remoteWs, ['add', '.']);
+  gitRun(remoteWs, ['commit', '-m', 'baseline']);
+  const origin = addOrigin(remoteWs);
+  gitRun(remoteWs, ['push', 'origin', 'main']);
+  for (const [branch, id] of [['reserved-one', 'T-0001'], ['reserved-two', 'T-0002'], ['reserved-three', 'T-0002']]) {
+    gitRun(remoteWs, ['checkout', '-b', branch, 'main']);
+    const dir = join(remoteWs, 'tri/tasks/phase-01');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${id}.md`), `# ${id}: reserved\n`);
+    gitRun(remoteWs, ['add', '.']);
+    gitRun(remoteWs, ['commit', '-m', branch]);
+    gitRun(remoteWs, ['push', '-u', 'origin', branch]);
+    gitRun(remoteWs, ['checkout', 'main']);
+  }
+  const created = run(remoteWs, ['new-task', '--title', 'After reservations', '--phase', '02']);
+  assertIncludes(created, 'T-0003');
+  const validation = run(remoteWs, ['validate', '--remote'], true);
+  assertIncludes(validation, 'T-0002');
+  rmSync(remoteWs, { recursive: true, force: true });
+  rmSync(origin, { recursive: true, force: true });
+});
+
+check('doctor parses canonical ADR status and consolidates stale task citations', () => {
+  const doctorWs = mkdtempSync(join(tmpdir(), 'tri-doctor-'));
+  initGit(doctorWs);
+  run(doctorWs, ['init', '--profile', 'standard', '--yes']);
+  writeFileSync(join(doctorWs, 'tri/adr/ADR-0001.md'), '# ADR-0001: Old decision\n\n- Status: Superseded by [ADR-0002](ADR-0002.md)\n');
+  writeFileSync(join(doctorWs, 'tri/adr/ADR-0002.md'), '# ADR-0002: New decision\n\n- Status: Accepted\n');
+  const taskDir = join(doctorWs, 'tri/tasks/phase-01');
+  mkdirSync(taskDir, { recursive: true });
+  writeFileSync(join(taskDir, 'T-0001.md'), '# T-0001: Uses old decision\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Applicable ADRs\n\n- ADR-0001\n\n## Acceptance criteria\n\n- old decision is replaced\n');
+  gitRun(doctorWs, ['add', '.']);
+  gitRun(doctorWs, ['commit', '-m', 'doctor fixture']);
+  const origin = addOrigin(doctorWs);
+  gitRun(doctorWs, ['push', 'origin', 'main']);
+  const out = run(doctorWs, ['doctor']);
+  assertIncludes(out, 'ADR-0001 is Superseded by ADR-0002');
+  assertIncludes(out, 'T-0001');
+  rmSync(doctorWs, { recursive: true, force: true });
+  rmSync(origin, { recursive: true, force: true });
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

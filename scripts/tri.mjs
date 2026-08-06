@@ -236,8 +236,9 @@ function remoteIdentifierInventory(cfg) {
       if (!text.ok || !baseText.ok) {
         return { available: false, baseRef, reason: (!text.ok ? text.reason : baseText.reason), branches, reserved: new Map(), collisions: [] };
       }
-      const baseDefinitions = definitionIdentifiers(cfg, file, baseText.text);
-      for (const [id, location] of definitionIdentifiers(cfg, file, text.text)) {
+      const baseDefinitions = baseText.missing ? new Map() : definitionIdentifiers(cfg, file, baseText.text);
+      const branchDefinitions = text.missing ? new Map() : definitionIdentifiers(cfg, file, text.text);
+      for (const [id, location] of branchDefinitions) {
         if (!baseDefinitions.has(id)) ids.set(id, { id, ref, branch: ref, file, location });
       }
     }
@@ -1208,39 +1209,79 @@ function registerFiles(cfg) {
   return files;
 }
 
-function adrMap(cfg, base, files) {
+function parseAdrDocument(file, text) {
+  const fileMatch = basename(file).match(/^(ADR-\d+)(?:[-_].*)?\.md$/i);
+  if (!fileMatch || /ADR-template\.md$/i.test(file)) return { ok: false, reason: 'not a canonical ADR file' };
+  const id = fileMatch[1].toUpperCase();
+  const headings = [...text.matchAll(/^#\s+(ADR-\d+)\s*:/gmi)].map((match) => match[1].toUpperCase());
+  if (headings.length !== 1 || headings[0] !== id) return { ok: false, id, reason: `filename/header mismatch (expected exactly one # ${id}: heading)` };
+  const statusMatch = text.match(/^\s*-\s*Status:\s*(.+?)\s*$/mi);
+  if (!statusMatch) return { ok: false, id, reason: 'missing Status field' };
+  const statusText = statusMatch[1].trim();
+  if (/^(?:Proposed|Accepted)$/i.test(statusText)) {
+    return { ok: true, id, file, text, status: statusText, successor: null };
+  }
+  const superseded = statusText.match(/^Superseded\s+by\s+(?:(ADR-\d+)|\[(ADR-\d+)\]\([^)]*\))$/i);
+  if (!superseded) return { ok: false, id, reason: `unsupported Status value "${statusText}"` };
+  return { ok: true, id, file, text, status: 'Superseded', successor: (superseded[1] ?? superseded[2]).toUpperCase() };
+}
+
+function adrMap(cfg, base, files, warnings = []) {
   const map = new Map();
   for (const file of files) {
-    const text = showRefFile(cfg, base, file);
-    const ids = definitionIdentifiers(cfg, file, text);
-    for (const [id] of ids) if (id.startsWith('ADR-')) map.set(id, { file, text });
+    const content = showRefFileResult(cfg, base, file);
+    if (!content.ok) { warnings.push(`cannot inspect ADR ${file} on ${base}: ${content.reason}`); continue; }
+    const parsed = parseAdrDocument(file, content.text);
+    if (!parsed.ok) { warnings.push(`${file}: malformed ADR: ${parsed.reason}`); continue; }
+    if (map.has(parsed.id)) warnings.push(`duplicate ADR definition ${parsed.id}: ${map.get(parsed.id).file} and ${file}`);
+    else map.set(parsed.id, parsed);
   }
   return map;
+}
+
+function taskAdrCitations(task) {
+  const applicable = task.sections['Applicable ADRs'] ?? '';
+  const scoped = [...applicable.matchAll(ADR_ID_RE)].map((match) => match[1].toUpperCase());
+  const source = scoped.length ? applicable : task.text;
+  return [...new Set([...source.matchAll(ADR_ID_RE)].map((match) => match[1].toUpperCase()))];
 }
 
 function cmdDoctor() {
   const cfg = loadConfig();
   const warnings = [];
   const base = gitRef(cfg);
-  const baseFiles = treeFiles(cfg, base);
+  const baseTree = treeFilesResult(cfg, base);
   const remote = remoteIdentifierInventory(cfg);
-  const knownAdrs = baseFiles.filter((p) => /(?:^|\/)ADR-\d+.*\.md$/i.test(p));
-  const adrs = adrMap(cfg, base, knownAdrs);
+  let adrs = new Map();
+  let authoritativeAdrs = false;
+  if (!baseTree.ok) {
+    warnings.push(`default branch ${base} unavailable; skipped authoritative ADR checks: ${baseTree.reason}`);
+  } else {
+    authoritativeAdrs = true;
+    const knownAdrs = baseTree.files.filter((p) => /(?:^|\/)ADR-\d+.*\.md$/i.test(p));
+    adrs = adrMap(cfg, base, knownAdrs, warnings);
+  }
   const tasks = loadTasks(cfg);
 
-  for (const task of tasks) {
-    for (const match of task.text.matchAll(ADR_ID_RE)) {
-      const id = match[1].toUpperCase();
-      const adr = adrs.get(id);
-      if (!adr) {
-        const remoteOwner = remote.reserved.get(id)?.[0];
-        warnings.push(`${task.id}: references ${id}, absent from default branch${remoteOwner ? ` (present on ${remoteOwner.ref})` : ''}`);
-        continue;
+  if (authoritativeAdrs) {
+    const stale = new Map();
+    for (const task of tasks) {
+      const citations = taskAdrCitations(task);
+      for (const id of citations) {
+        const adr = adrs.get(id);
+        if (!adr) {
+          const remoteOwner = remote.reserved.get(id)?.[0];
+          warnings.push(`${task.id}: references ${id}, absent from default branch${remoteOwner ? ` (present on ${remoteOwner.ref})` : ''}`);
+          continue;
+        }
+        if (adr.successor && !citations.includes(adr.successor)) {
+          if (!stale.has(id)) stale.set(id, { successor: adr.successor, tasks: [] });
+          stale.get(id).tasks.push(task.id);
+        }
       }
-      const successor = adr.text.match(/^[-*]\s*Status:\s*Superseded\s+by\s+(ADR-\d+)/mi)?.[1]?.toUpperCase();
-      if (successor && !new RegExp(`\\b${successor}\\b`).test(task.text)) {
-        warnings.push(`${task.id}: references Superseded ${id} without successor ${successor}`);
-      }
+    }
+    for (const [id, entry] of stale) {
+      warnings.push(`${id} is Superseded by ${entry.successor}; tasks still cite it without successor: ${[...new Set(entry.tasks)].join(', ')}`);
     }
   }
 
