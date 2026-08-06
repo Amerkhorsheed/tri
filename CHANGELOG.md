@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.4.0 — 2026-08-06
+
+- A dependency on a `Withdrawn` task no longer deadlocks: it warns in `done` and does not block the frontier, matching what `validate` already reported.
+- Evidence runtime checks warn when **any** recorded run came from outside the expected environment, not only when every run did — the mixed host/container case from the field report can no longer pass silently.
+- `new-task` with a project `taskTemplate` now fails instead of silently dropping a `--phase` or `--dep` the template cannot express.
+- `validate` flags a single task whose Objective restates its title verbatim instead of waiting for a majority of tasks to share the defect.
+- `/tri:clarify`, `plan`, and `ship` now document the promotion rule: `Unrevised` becomes `Specified` only when the run actually edited Objective and Acceptance criteria.
+- `rebaseline` layer paths follow configured `adrDir` and `decisionFiles` instead of hardcoded `tri/adr`, and honor `baseBranch` when `defaultBranch` is unset.
+- `done` in lite profile no longer warns about evidence execution context the profile does not require; removed dead identifier-map code.
+
+## 2.3.0 — 2026-08-06
+
+- Hardened remote identifier inventory to fail closed when configured refs, fetches, or branch comparisons are unavailable.
+- Preserved configured task-template fields unless explicit CLI options own them; malformed runtime probes and unsupported companion strategies now fail clearly.
+- Hardened evidence and companion subprocess failure reporting.
+- Added Git-backed regression coverage for remote reservation failures/collisions and canonical doctor ADR checks.
+- Hardened doctor against malformed/fenced ADR metadata, duplicate definitions, out-of-scope ADR paths, and incomplete task citations.
+
+## 2.2.0 — 2026-08-06
+
+- Added collision-safe remote identifier reservations, `sync`, and `validate --remote` for task, ADR, and register identifiers.
+- Added structured evidence execution context, expected-environment warnings, and the `evidence` command while preserving legacy evidence records.
+- Added configured task-template validation, companion strategies/hooks and `companions --check`.
+- Added first-class `Withdrawn` lifecycle status, specification status (`Unrevised`/`Specified`/`Withdrawn`), boilerplate warnings, and TODO objectives for generated tasks.
+- Added `doctor` governing-document warnings and ordered `rebaseline` state machine.
+- Added command, skill, template, and cross-agent documentation for new safeguards.
+
 ## 2.1.0 — 2026-08-05
 
 - Added explicit claim-scope manifests with task, responsibility, ADR, owner, and future-coverage fields. Claims validate and refuse overlapping local scopes instead of inferring ownership from branch names.

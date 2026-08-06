@@ -50,16 +50,21 @@ Full walkthrough with commands, batch runs, and profiles: [docs/guide.html](docs
 | `/tri:run [scope]` | Autonomous batch execution — asks scope (phase/N/until-blocked) and mode (sequential/parallel subagents) once, then runs task after task through the gates without checkpoints; resumable via `.tri/run.json` |
 | `/tri:clarify [target]` | Interrogate and refine what is unclear — a task, a phase, or a decision you doubt. Batches questions for specs, goes one at a time for decisions. Writes results into files and registers |
 | `/tri:visualize [target]` | Interactive HTML board (phase lanes, dependencies, critical path) written to gitignored `.tri/`, opened for discussion |
+| `/tri:sync` | Fetch remote branches and reserve task/register identifiers allocated off default branch |
+| `/tri:evidence <T-NNNN> -- command` | Capture command output plus structured runtime context |
+| `/tri:companions --check` | Check configured companion files and invoke maintenance hook |
+| `/tri:doctor` | Warn on governing-document drift and remote identifier collisions |
+| `/tri:rebaseline` | Drive ordered charter-to-task re-baseline layers |
 
 Direct script use (what agents and CI run):
 
 ```bash
-node scripts/tri.mjs <init|new-task|validate|next|claim|release|done|status|graph|visualize|run-state>
+node scripts/tri.mjs <init|new-task|validate|next|claim|release|done|status|graph|visualize|run-state|sync|evidence|companions|doctor|rebaseline>
 ```
 
 ## Branch and PR workflows
 
-`"workflow": "trunk"` (default) or `"branch-pr"` in `tri.config.json`. Trunk: pushed claim commit = the lock. Branch-pr: one branch per task (`task-0261-endpoint-enforcement`), the pushed branch is the lock (checked before claiming), `done` flips status inside the branch and becomes truth when the PR merges, and the frontier is only read from the default branch. Command workflows push claim/work commits immediately, verify the remote ref, stop on push failure, and ask before opening or merging a PR against the configured development base; they never merge silently. The script itself never runs git — branch/PR mechanics stay in the command/skill layer where they're visible.
+`workflow` controls branch/PR mechanics. TRI itself now runs read-only Git inspection for remote identifier reservations (`sync`, allocation, `validate --remote`, and `doctor`); command/skill layer still owns branch creation, commits, pushes, and PRs.
 
 ## Batch execution vs the gates
 
@@ -110,15 +115,20 @@ tri reads foreign task formats through config instead of rewriting files. Exampl
   "evidenceDir": "docs/testing/evidence",
   "taskTemplate": "tasks/TASK_TEMPLATE.md",
   "companionFiles": ["tasks/README.md", "tasks/validate-tasks.mjs"],
-  "claimScope": {
-    "directory": ".tri/claims",
-    "responsibilities": ["mobile-runtime", "admin"]
-  },
+  "companions": [{"path": "tasks/README.md", "strategy": "check"}],
+  "companionHooks": {"new-task": ["node", "scripts/update-companions.mjs"]},
+  "adrDir": "tri/adr",
+  "decisionFiles": ["tri/DECISIONS.md", "tri/ASSUMPTIONS.md"],
+  "runtimeProbes": [["php", "--version"]],
+  "expectedEnvironment": {"node": "v24"},
+  "requireRemoteReservations": true,
+  "claimScope": {"directory": ".tri/claims", "responsibilities": ["admin"]},
+  "defaultBranch": "main",
   "baseBranch": "dev"
 }
 ```
 
-`taskTemplate` makes `new-task` write the project's own template rather than tri's — the project's fields are what its validators enforce. `companionFiles` are files tri deliberately does not edit (task indexes, pinned inventory counts) but names on every creation so they move in the same change.
+`taskTemplate` makes `new-task` write the project's own template and fails if required sections are missing; TRI preserves template-owned fields and only replaces Phase/Dependencies when corresponding CLI options are supplied. `companionFiles` remains a legacy check-only list; `companions` supports path checks with strategy `check`, while unsupported strategies must use hooks. `companionHooks` uses argv arrays after `new-task`, `done`, `validate`, or `companions --check`. `runtimeProbes` and `expectedEnvironment` make evidence show declared runtime context; malformed probes and failed probes stop evidence capture. `sync` fetches remote branches and reserves identifiers not yet on the default branch; configured remote reservation failures stop allocation. `doctor` reports dangling ADR references and remote collisions as warnings. `Withdrawn` remains in registers but never enters frontier. `Specification status` defaults old tasks to `Specified`; generated tasks start `Unrevised`.
 
 When creating a task, `--phase NN` targets `phase-NN`. If an existing task tree has exactly one suffixed directory such as `phase-12-mobile`, tri reuses it; `--phase NN-label` targets that exact label. Multiple suffixed matches, or a canonical directory alongside a suffixed match, fail instead of choosing silently. A phase with no match gets the canonical `phase-NN` directory.
 
@@ -132,4 +142,4 @@ node scripts/test-tri.mjs && node scripts/check-consistency.mjs
 
 The consistency check fails when a change reaches one artifact but not its companions — an undocumented command or config key, a version without a changelog entry, a stale test count, a broken link. See [CONTRIBUTING.md](CONTRIBUTING.md) for what must move together.
 
-44 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, phase directory compatibility and conflict refusal, and graph metrics.
+61 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, Withdrawn and Unrevised lifecycle behavior, phase directory compatibility and conflict refusal, graph metrics, remote reservation failures/collisions, canonical doctor checks, and the post-2.1.0 hardening regressions.

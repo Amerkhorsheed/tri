@@ -103,7 +103,7 @@ One task → `<task-id-lowercase>-<slug>`. A ship run → `ship/<date>-<slug>`. 
 4. Implement exactly that task. New work discovered → `tri.mjs new-task`, never scope-fold.
 5. Record assumptions in `tri/ASSUMPTIONS.md`; unresolved choices in `tri/DECISIONS.md` as blocking entries. **Never choose silently.**
 6. Fill the task's Evidence section (commands + observed results). Strict profile: also `tri/evidence/<ID>-<date>.md`.
-7. `tri.mjs validate` must pass, then `tri.mjs done T-NNNN`, commit, push, and verify the remote ref.
+7. `tri.mjs validate` must pass, then `tri.mjs done T-NNNN`, commit, push, and verify the remote ref. Use `tri.mjs evidence T-NNNN -- <command>` when recording structured runtime context; `done` keeps legacy prose evidence compatible but warns when context is missing or mismatched.
 
 ## Parallel work (dynamic claiming)
 
@@ -111,8 +111,8 @@ Claiming is pull-based and dynamic: claim when you start, claim more when you fi
 
 - A claim is real only once committed/pushed. Two devs claiming the same task = push conflict; first push wins, second runs `next` and picks another. Never treat a local commit as a remote claim.
 - `release` on a task held by someone else requires `--force`, the same protection `claim` has. Pass `--by <name>` so the check can fire.
-- `new-task` allocates the next id from the **local** tree. Two developers creating a task from the same base get the same id; pull before pushing, and `validate` catches the duplicate if you don't.
-- Claims are **advisory**: the script warns (never blocks) when claiming a task with unmet dependencies — the dev is trusted to know why.
+- `new-task` allocates the next id from the **local tree plus remote reservations**. Run `tri.mjs sync` before allocating; it fetches remote branches and scans identifiers introduced outside configured default branch. Two developers creating a task from the same base are warned or rejected by `validate --remote`; resolve by keeping both entries and renumbering incoming entries to the next free identifier at resolution time, never a preselected target.
+- Generated tasks start with `Specification status: Unrevised` and a TODO Objective. `next` flags them, `claim` warns, and batch runs warn unless explicitly passed `--allow-unrevised`; old tasks without the field default to `Specified`. `/tri:clarify` promotes a task to `Specified`, and only when the run actually edited its Objective and Acceptance criteria — the promotion is a claim the spec is written, never a ceremony. `Withdrawn` tasks remain recorded but never enter the frontier; dependencies on them produce warnings and do not block `done` or the frontier.
 - Cross-cutting files (API contracts, shared schemas) get changed in their own small PR reviewed by the other dev *before* dependent implementation. Everything else merges on green `validate` + project tests.
 - Registers (DECISIONS/ASSUMPTIONS) are append-only; merge conflicts resolve by keeping both entries.
 
@@ -126,11 +126,11 @@ The gate between specification and implementation is not optional. Specification
 
 Autonomous multi-task execution. Scope and mode are chosen interactively at start; the loop then runs without human checkpoints — the gates are the brakes. State lives in `.tri/run.json` (local scratch, survives restarts) and is written **only** through the script: `run-state --start "<scope>" --mode <m> --queue <IDs>`, then `--done <ID>` / `--blocked <ID>` after each task, then `--finish`. Bare `run-state` prints what remains, which is how a killed session resumes. Never hand-edit the file. In `branch-pr` workflow a sequential run uses ONE run branch (`run/<date>-<scope>`, first commit claims the queue, pushed immediately) with one atomic commit per task and one PR per phase boundary — tasks stack, so intra-run dependency chains work; per-task branches from the default branch would silently drop the previous task's unmerged code. Parallel subagent runs keep per-task branches/PRs. Contract/shared-file tasks are extracted to their own PR for review while the run continues. Open PRs go in the final report; the frontier is read from the default branch only.
 
-Mid-run rules: never ask the user between tasks. A task needing an owner decision or clarification gets its B-/register entry, goes Blocked, and the run continues with other runnable tasks; questions batch to the end. Halt outright only for a red gate after a real fix attempt, or an empty runnable set. Machine-readable feeds: `next --json`, `status --json`.
+`run-state --start` refuses queues containing `Unrevised` tasks unless the caller passes explicit `--allow-unrevised`; this keeps batch mode from implementing placeholders by accident.
 
 ## Branches and PRs
 
-`tri.config.json` sets `"workflow"`: `"trunk"` (default) or `"branch-pr"`. The script never runs git — branch/PR discipline is yours, per this section.
+`tri.config.json` sets `"workflow"`: `"trunk"` (default) or `"branch-pr"`. TRI runs read-only Git inspection for remote reservations and default-branch checks; branch/PR discipline remains in this command/skill layer.
 
 **trunk:** work on the shared branch; the pushed claim commit is the lock.
 

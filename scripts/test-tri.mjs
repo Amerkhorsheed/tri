@@ -3,7 +3,7 @@
 // Builds a throwaway workspace in a temp dir, seeds defects, asserts behavior.
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +20,23 @@ function run(cwd, args, expectFail = false) {
     if (expectFail) return (e.stdout ?? '') + (e.stderr ?? '');
     throw e;
   }
+}
+
+function gitRun(cwd, args) {
+  return execFileSync('git', args, { cwd, encoding: 'utf8' });
+}
+
+function initGit(cwd) {
+  gitRun(cwd, ['init', '-b', 'main']);
+  gitRun(cwd, ['config', 'user.email', 'tri-test@example.com']);
+  gitRun(cwd, ['config', 'user.name', 'tri test']);
+}
+
+function addOrigin(cwd) {
+  const bare = mkdtempSync(join(tmpdir(), 'tri-origin-'));
+  execFileSync('git', ['init', '--bare', bare], { encoding: 'utf8' });
+  gitRun(cwd, ['remote', 'add', 'origin', bare]);
+  return bare;
 }
 
 function check(name, fn) {
@@ -182,11 +199,30 @@ check('done succeeds once Evidence is filled, and unblocks dependents', () => {
   assertIncludes(next, 'T-0002');
 });
 
-// --- status and graph ---
+check('validate recognizes Withdrawn tasks and warns about withdrawn dependencies', () => {
+  const withdrawn = join(ws, 'tri/tasks/phase-03/T-0008.md');
+  mkdirSync(dirname(withdrawn), { recursive: true });
+  writeFileSync(withdrawn, '# T-0008: Withdrawn work\n\n## Status\n\nWithdrawn\n\n## Dependencies\n\nN/A\n\n## Acceptance criteria\n\n- retained\n');
+  const dependent = join(ws, 'tri/tasks/phase-03/T-0009.md');
+  writeFileSync(dependent, '# T-0009: Follow-up\n\n## Status\n\nPlanned\n\n## Dependencies\n\n- T-0008\n\n## Acceptance criteria\n\n- follow\n');
+  const out = run(ws, ['validate']);
+  assertIncludes(out, 'depends on Withdrawn');
+  assert(!run(ws, ['next']).includes('T-0008'), 'Withdrawn task entered frontier');
+});
+
+check('generated tasks are marked Unrevised and next flags them', () => {
+  const out = run(ws, ['new-task', '--title', 'Generated specification', '--phase', '04']);
+  assertIncludes(out, 'T-0010');
+  const text = readFileSync(join(ws, 'tri/tasks/phase-04/T-0010.md'), 'utf8');
+  assertIncludes(text, '## Specification status\n\nUnrevised');
+  assertIncludes(text, 'TODO: state what is true after this task');
+  assertIncludes(run(ws, ['next']), 'Unrevised');
+});
+
 check('status reports counts, frontier, and claims', () => {
   const out = run(ws, ['status']);
   assertIncludes(out, 'Done: 1');
-  assertIncludes(out, 'Planned: 4');
+  assertIncludes(out, 'Planned: 6');
 });
 
 check('graph reports critical path depth', () => {
@@ -375,12 +411,12 @@ check('malformed config fails with a readable message, not a stack trace', () =>
   assert(!out.includes('at JSON.parse'), `leaked a stack trace:\n${out}`);
 });
 
-check('new-task warns that IDs are allocated from the local tree only', () => {
+check('new-task reports collision-safe remote/default-branch allocation', () => {
   writeFileSync(join(ws4, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks' }));
   const out = run(ws4, ['new-task', '--title', 'First', '--phase', '01']);
   assertIncludes(out, 'T-0001');
-  assert(/pull|local tree|another developer/i.test(out),
-    `no collision warning in output:\n${out}`);
+  assert(/remote|default branch|next free identifier/i.test(out),
+    `no collision-safe allocation notice in output:\n${out}`);
 });
 
 check('release refuses to take another developer\'s claim without --force', () => {
@@ -397,10 +433,15 @@ check('release by the holder needs no force', () => {
   assertIncludes(out, 'released');
 });
 
+check('run-state refuses Unrevised queue without explicit override', () => {
+  run(ws4, ['new-task', '--title', 'Unrevised queue target', '--phase', '01']);
+  const out = run(ws4, ['run-state', '--start', 'unrevised', '--mode', 'sequential', '--queue', 'T-0002'], true);
+  assertIncludes(out, '--allow-unrevised');
+});
 check('run-state records a batch and survives to be resumed', () => {
   run(ws4, ['new-task', '--title', 'Second', '--phase', '01']);
   run(ws4, ['new-task', '--title', 'Third', '--phase', '01']);
-  const started = run(ws4, ['run-state', '--start', 'phase 01', '--mode', 'sequential', '--queue', 'T-0001,T-0002,T-0003']);
+  const started = run(ws4, ['run-state', '--start', 'phase 01', '--mode', 'sequential', '--queue', 'T-0001,T-0002,T-0003', '--allow-unrevised']);
   assertIncludes(started, 'T-0001');
   const state = JSON.parse(readFileSync(join(ws4, '.tri/run.json'), 'utf8'));
   assert(state.queue.length === 3, `queue not recorded: ${JSON.stringify(state)}`);
@@ -423,6 +464,234 @@ check('run-state records a batch and survives to be resumed', () => {
 check('run-state reports no active run when none exists', () => {
   const out = run(ws, ['run-state']);
   assert(/no active run/i.test(out), `expected no-active-run message:\n${out}`);
+});
+
+// --- remote inventory and canonical doctor fixtures ---
+check('configured remote allocation fails when default ref is missing', () => {
+  const remoteWs = mkdtempSync(join(tmpdir(), 'tri-remote-missing-'));
+  initGit(remoteWs);
+  addOrigin(remoteWs);
+  writeFileSync(join(remoteWs, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks', requireRemoteReservations: true }));
+  mkdirSync(join(remoteWs, 'tri/tasks'), { recursive: true });
+  const out = run(remoteWs, ['new-task', '--title', 'Blocked allocation', '--phase', '01'], true);
+  assert(/origin\/main|remote inventory/i.test(out), `missing default ref was not reported:\n${out}`);
+  rmSync(remoteWs, { recursive: true, force: true });
+});
+
+check('configured remote fetch failure stops allocation', () => {
+  const remoteWs = mkdtempSync(join(tmpdir(), 'tri-remote-fetch-'));
+  initGit(remoteWs);
+  gitRun(remoteWs, ['remote', 'add', 'origin', join(remoteWs, 'missing-origin.git')]);
+  writeFileSync(join(remoteWs, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks', requireRemoteReservations: true }));
+  mkdirSync(join(remoteWs, 'tri/tasks'), { recursive: true });
+  const out = run(remoteWs, ['new-task', '--title', 'Blocked fetch', '--phase', '01'], true);
+  assert(/git fetch|failed/i.test(out), `fetch failure was not reported:\n${out}`);
+  rmSync(remoteWs, { recursive: true, force: true });
+});
+
+check('valid empty default tree remains usable for allocation', () => {
+  const remoteWs = mkdtempSync(join(tmpdir(), 'tri-remote-empty-'));
+  initGit(remoteWs);
+  gitRun(remoteWs, ['commit', '--allow-empty', '-m', 'empty baseline']);
+  const origin = addOrigin(remoteWs);
+  gitRun(remoteWs, ['push', 'origin', 'main']);
+  writeFileSync(join(remoteWs, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks' }));
+  mkdirSync(join(remoteWs, 'tri/tasks'), { recursive: true });
+  const out = run(remoteWs, ['new-task', '--title', 'Empty baseline allocation', '--phase', '01']);
+  assertIncludes(out, 'T-0001');
+  rmSync(remoteWs, { recursive: true, force: true });
+  rmSync(origin, { recursive: true, force: true });
+});
+
+check('explicit baseBranch selects configured remote baseline', () => {
+  const remoteWs = mkdtempSync(join(tmpdir(), 'tri-remote-base-'));
+  initGit(remoteWs);
+  gitRun(remoteWs, ['checkout', '-b', 'dev']);
+  gitRun(remoteWs, ['commit', '--allow-empty', '-m', 'development baseline']);
+  const origin = addOrigin(remoteWs);
+  gitRun(remoteWs, ['push', 'origin', 'dev']);
+  writeFileSync(join(remoteWs, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks', baseBranch: 'dev' }));
+  mkdirSync(join(remoteWs, 'tri/tasks'), { recursive: true });
+  const out = run(remoteWs, ['new-task', '--title', 'Development allocation', '--phase', '01']);
+  assertIncludes(out, 'T-0001');
+  rmSync(remoteWs, { recursive: true, force: true });
+  rmSync(origin, { recursive: true, force: true });
+});
+
+check('remote branches reserve identifiers and collisions fail remote validation', () => {
+  const remoteWs = mkdtempSync(join(tmpdir(), 'tri-remote-reserved-'));
+  initGit(remoteWs);
+  run(remoteWs, ['init', '--profile', 'standard', '--yes']);
+  gitRun(remoteWs, ['add', '.']);
+  gitRun(remoteWs, ['commit', '-m', 'baseline']);
+  const origin = addOrigin(remoteWs);
+  gitRun(remoteWs, ['push', 'origin', 'main']);
+  for (const [branch, id] of [['reserved-one', 'T-0001'], ['reserved-two', 'T-0002'], ['reserved-three', 'T-0002']]) {
+    gitRun(remoteWs, ['checkout', '-b', branch, 'main']);
+    const dir = join(remoteWs, 'tri/tasks/phase-01');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${id}.md`), `# ${id}: reserved\n`);
+    gitRun(remoteWs, ['add', '.']);
+    gitRun(remoteWs, ['commit', '-m', branch]);
+    gitRun(remoteWs, ['push', '-u', 'origin', branch]);
+    gitRun(remoteWs, ['checkout', 'main']);
+  }
+  const created = run(remoteWs, ['new-task', '--title', 'After reservations', '--phase', '02']);
+  assertIncludes(created, 'T-0003');
+  const validation = run(remoteWs, ['validate', '--remote'], true);
+  assertIncludes(validation, 'T-0002');
+  rmSync(remoteWs, { recursive: true, force: true });
+  rmSync(origin, { recursive: true, force: true });
+});
+
+check('doctor parses canonical ADR status and consolidates stale task citations', () => {
+  const doctorWs = mkdtempSync(join(tmpdir(), 'tri-doctor-'));
+  initGit(doctorWs);
+  run(doctorWs, ['init', '--profile', 'standard', '--yes']);
+  writeFileSync(join(doctorWs, 'tri/adr/ADR-0001.md'), '# ADR-0001: Old decision\n\n- Status: Superseded by [ADR-0002](ADR-0002.md)\n');
+  writeFileSync(join(doctorWs, 'tri/adr/ADR-0002.md'), '# ADR-0002: New decision\n\n- Status: Accepted\n');
+  const taskDir = join(doctorWs, 'tri/tasks/phase-01');
+  mkdirSync(taskDir, { recursive: true });
+  writeFileSync(join(taskDir, 'T-0001.md'), '# T-0001: Uses old decision\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Applicable ADRs\n\n- ADR-0001\n\n## Acceptance criteria\n\n- old decision is replaced\n');
+  gitRun(doctorWs, ['add', '.']);
+  gitRun(doctorWs, ['commit', '-m', 'doctor fixture']);
+  const origin = addOrigin(doctorWs);
+  gitRun(doctorWs, ['push', 'origin', 'main']);
+  const out = run(doctorWs, ['doctor']);
+  assertIncludes(out, 'ADR-0001 is Superseded by ADR-0002');
+  assertIncludes(out, 'T-0001');
+  rmSync(doctorWs, { recursive: true, force: true });
+  rmSync(origin, { recursive: true, force: true });
+});
+
+check('doctor rejects malformed ADR metadata without calling it absent', () => {
+  const doctorWs = mkdtempSync(join(tmpdir(), 'tri-doctor-malformed-'));
+  initGit(doctorWs);
+  run(doctorWs, ['init', '--profile', 'standard', '--yes']);
+  writeFileSync(join(doctorWs, 'tri/adr/ADR-0001.md'), '# ADR-0001\n\n```\n- Status: Accepted\n```\n\n- Status: Accepted\n');
+  const taskDir = join(doctorWs, 'tri/tasks/phase-01');
+  mkdirSync(taskDir, { recursive: true });
+  writeFileSync(join(taskDir, 'T-0001.md'), '# T-0001: Uses malformed ADR\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Applicable ADRs\n\n- ADR-0001\n\n## Acceptance criteria\n\n- detect malformed ADR\n');
+  gitRun(doctorWs, ['add', '.']);
+  gitRun(doctorWs, ['commit', '-m', 'malformed doctor fixture']);
+  const origin = addOrigin(doctorWs);
+  gitRun(doctorWs, ['push', 'origin', 'main']);
+  const out = run(doctorWs, ['doctor']);
+  assertIncludes(out, 'malformed ADR');
+  assertIncludes(out, 'references malformed ADR-0001');
+  assert(!out.includes('ADR-0001, absent from default branch'), 'malformed ADR was misreported absent');
+  rmSync(doctorWs, { recursive: true, force: true });
+  rmSync(origin, { recursive: true, force: true });
+});
+
+check('doctor accepts successor cited in task body outside Applicable ADRs', () => {
+  const doctorWs = mkdtempSync(join(tmpdir(), 'tri-doctor-body-'));
+  initGit(doctorWs);
+  run(doctorWs, ['init', '--profile', 'standard', '--yes']);
+  writeFileSync(join(doctorWs, 'tri/adr/ADR-0001.md'), '# ADR-0001: Old decision\n\n- Status: Superseded by ADR-0002\n');
+  writeFileSync(join(doctorWs, 'tri/adr/ADR-0002.md'), '# ADR-0002: New decision\n\n- Status: Accepted\n');
+  const taskDir = join(doctorWs, 'tri/tasks/phase-01');
+  mkdirSync(taskDir, { recursive: true });
+  writeFileSync(join(taskDir, 'T-0001.md'), '# T-0001: Migrated\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Applicable ADRs\n\n- ADR-0001\n\n## Context\n\nMigration follows ADR-0002.\n\n## Acceptance criteria\n\n- migrated\n');
+  gitRun(doctorWs, ['add', '.']);
+  gitRun(doctorWs, ['commit', '-m', 'body citation fixture']);
+  const origin = addOrigin(doctorWs);
+  gitRun(doctorWs, ['push', 'origin', 'main']);
+  const out = run(doctorWs, ['doctor']);
+  assert(!out.includes('without successor'), `body successor was ignored:\n${out}`);
+  rmSync(doctorWs, { recursive: true, force: true });
+  rmSync(origin, { recursive: true, force: true });
+});
+
+// --- post-2.1.0 hardening regressions ---
+check('a dependency on a Withdrawn task does not deadlock frontier or done', () => {
+  const p = join(ws, 'tri/tasks/phase-03/T-0009.md');
+  const orig = readFileSync(p, 'utf8');
+  writeFileSync(p, orig.replace('## Acceptance criteria', '## Evidence\n\n- follow-up verified against retained record\n\n## Acceptance criteria'));
+  assertIncludes(run(ws, ['next']), 'T-0009');
+  run(ws, ['claim', 'T-0009', '--by', 'dev-a']);
+  const out = run(ws, ['done', 'T-0009']);
+  assertIncludes(out, 'dependencies Withdrawn: T-0008');
+  assertIncludes(out, 'T-0009 marked Done');
+});
+
+check('validate flags a single placeholder objective instead of waiting for a majority', () => {
+  const w = mkdtempSync(join(tmpdir(), 'tri-title-'));
+  writeFileSync(join(w, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks' }));
+  const dir = join(w, 'tri/tasks/phase-01');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'T-0001.md'), '# T-0001: Fix the login bug\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Objective\n\nDeliver one independently verifiable increment that will Fix the login bug.\n\n## Acceptance criteria\n\n- logged in\n');
+  writeFileSync(join(dir, 'T-0002.md'), '# T-0002: Add regression tests\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Objective\n\nCover the login flow with regression tests.\n\n## Acceptance criteria\n\n- suite passes\n');
+  writeFileSync(join(dir, 'T-0003.md'), '# T-0003: Style the header\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Objective\n\nUnify header spacing and typography.\n\n## Acceptance criteria\n\n- consistent\n');
+  writeFileSync(join(dir, 'T-0004.md'), '# T-0004: Add dark mode\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Objective\n\nShip a dark colour scheme with contrast checks.\n\n## Acceptance criteria\n\n- contrast passes\n');
+  const out = run(w, ['validate']);
+  assertIncludes(out, 'T-0001: Objective restates the title verbatim');
+  assert(!out.includes('T-0002'), 'legitimate objective containing its title was flagged');
+});
+
+check('evidence from a mixture of environments warns about the mismatching run', () => {
+  const w = mkdtempSync(join(tmpdir(), 'tri-env-'));
+  writeFileSync(join(w, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks', expectedEnvironment: { node: 'v18' } }));
+  const dir = join(w, 'tri/tasks/phase-01');
+  mkdirSync(join(w, 'tri/evidence'), { recursive: true });
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'T-0001.md'), '# T-0001: Verify build\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Evidence\n\n- suite passes\n\n## Acceptance criteria\n\n- green\n');
+  writeFileSync(join(w, 'tri/evidence/T-0001-20260806.md'), '# Evidence: T-0001\n\n## Execution context (2026-08-06T00:00:00Z)\n\n```json\n{"command":["npm","test"],"context":{"node":"v18.21.3"}}\n```\n\n## Execution context (2026-08-06T00:00:01Z)\n\n```json\n{"command":["npm","test"],"context":{"node":"v24.0.0"}}\n```\n');
+  run(w, ['claim', 'T-0001', '--by', 'dev-a']);
+  const out = run(w, ['done', 'T-0001']);
+  assertIncludes(out, 'Evidence runtime differs from expected environment');
+  assertIncludes(out, 'T-0001 marked Done');
+});
+
+check('taskTemplate without a Phase section fails when --phase is supplied', () => {
+  const w = mkdtempSync(join(tmpdir(), 'tri-tpl-phase-'));
+  writeFileSync(join(w, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tasks', taskTemplate: 'tasks/TASK_TEMPLATE.md' }));
+  mkdirSync(join(w, 'tasks'), { recursive: true });
+  writeFileSync(join(w, 'tasks/TASK_TEMPLATE.md'), '# Task Template\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Acceptance criteria\n\n- \n');
+  const out = run(w, ['new-task', '--title', 'Phaseless task', '--phase', '02'], true);
+  assertIncludes(out, '## Phase');
+  assert(!existsSync(join(w, 'tasks/phase-02/T-0001.md')), 'task written despite template mismatch');
+});
+
+check('rebaseline honors baseBranch when defaultBranch is unset', () => {
+  const w = mkdtempSync(join(tmpdir(), 'tri-rebase-base-'));
+  initGit(w);
+  gitRun(w, ['checkout', '-b', 'dev']);
+  gitRun(w, ['commit', '--allow-empty', '-m', 'baseline']);
+  writeFileSync(join(w, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks', baseBranch: 'dev' }));
+  mkdirSync(join(w, 'tri/tasks'), { recursive: true });
+  gitRun(w, ['add', '.']);
+  gitRun(w, ['commit', '-m', 'config']);
+  run(w, ['rebaseline', '--approve']);
+  writeFileSync(join(w, 'PROJECT_CHARTER.md'), '# Charter\n\n- internal-only\n');
+  gitRun(w, ['add', '.']);
+  gitRun(w, ['commit', '-m', 'charter layer']);
+  const out = run(w, ['rebaseline', '--complete']);
+  assertIncludes(out, 'layer complete');
+  rmSync(w, { recursive: true, force: true });
+});
+
+check('rebaseline layer paths follow configured adrDir', () => {
+  const w = mkdtempSync(join(tmpdir(), 'tri-rebase-adrdir-'));
+  initGit(w);
+  gitRun(w, ['commit', '--allow-empty', '-m', 'baseline']);
+  writeFileSync(join(w, 'tri.config.json'), JSON.stringify({ profile: 'standard', taskDir: 'tri/tasks', adrDir: 'docs/adr', decisionFiles: ['docs/DECISIONS.md'] }));
+  mkdirSync(join(w, 'tri/tasks'), { recursive: true });
+  gitRun(w, ['add', '.']);
+  gitRun(w, ['commit', '-m', 'config']);
+  run(w, ['rebaseline', '--approve']);
+  writeFileSync(join(w, 'PROJECT_CHARTER.md'), '# Charter\n\n- internal-only\n');
+  gitRun(w, ['add', '.']);
+  gitRun(w, ['commit', '-m', 'charter layer']);
+  run(w, ['rebaseline', '--complete']);
+  run(w, ['rebaseline', '--approve']);
+  mkdirSync(join(w, 'docs/adr'), { recursive: true });
+  writeFileSync(join(w, 'docs/adr/ADR-0001.md'), '# ADR-0001: Keep internal\n\n- Status: Accepted\n');
+  gitRun(w, ['add', '.']);
+  gitRun(w, ['commit', '-m', 'adr layer']);
+  const out = run(w, ['rebaseline', '--complete']);
+  assertIncludes(out, 'layer complete');
+  rmSync(w, { recursive: true, force: true });
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
