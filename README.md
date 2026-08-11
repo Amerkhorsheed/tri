@@ -34,7 +34,7 @@ codex plugin add tri@tri
 Pi — install the package (skill, `/tri:*` commands, selectable questions, and cancellable parallel worker tool):
 
 ```bash
-pi install git:github.com/Amerkhorsheed/tri@v3.1.0
+pi install git:github.com/Amerkhorsheed/tri@v3.1.1
 ```
 
 Gemini CLI — install the extension, which bundles commands, the skill, and `tri-worker`. Native subagents are experimental and must be enabled with `{"experimental":{"enableAgents":true}}` in Gemini settings:
@@ -146,7 +146,7 @@ tri reads foreign task formats through config instead of rewriting files. Exampl
 }
 ```
 
-`taskTemplate` makes `new-task` use the project's template and fail on missing required sections. `idStrategy` is `random` for TRI-native v3 workspaces; `sequential` preserves foreign numeric validators and legacy remote reservation checks. Unknown config keys fail unless namespaced `x-*`; writable paths must stay inside the repository. `requiredChecks`, runtime probes, and expected environment drive structured evidence gates. Evidence stores command metadata, status, output byte count/hash, runtime, and TRI version—not raw output. Companion hooks, doctor, Withdrawn, and Unrevised lifecycle support remain available.
+`taskTemplate` makes `new-task` use the project's template and fail on missing required sections. Adopted task fields may retain explanatory prose after a leading `Specified`, `Unrevised`, or `Withdrawn` token; historical `Implemented before the re-baseline` records remain specified. Root `DECISIONS.md` and `ASSUMPTIONS.md` are discovered when `decisionFiles` is omitted. `idStrategy` is `random` for TRI-native v3 workspaces; `sequential` preserves foreign numeric validators and legacy remote reservation checks. Unknown config keys fail unless namespaced `x-*`; writable paths must stay inside the repository. `requiredChecks`, runtime probes, and expected environment drive structured evidence gates. Evidence stores command metadata, status, output byte count/hash, runtime, and TRI version—not raw output. Companion hooks, doctor, Withdrawn, and Unrevised lifecycle support remain available.
 
 When creating a task, `--phase NN` targets `phase-NN`. If an existing task tree has exactly one suffixed directory such as `phase-12-mobile`, tri reuses it; `--phase NN-label` targets that exact label. Multiple suffixed matches, or a canonical directory alongside a suffixed match, fail instead of choosing silently. A phase with no match gets the canonical `phase-NN` directory.
 
@@ -160,4 +160,4 @@ node scripts/test-tri.mjs && node scripts/test-v3.mjs && node scripts/test-adapt
 
 The consistency check fails when a change reaches one artifact but not its companions — an undocumented command or config key, a version without a changelog entry, a stale test count, a broken link. See [CONTRIBUTING.md](CONTRIBUTING.md) for what must move together.
 
-79 behavioral tests cover legacy adapters plus v3 decentralized IDs, engine-owned ADR/register creation, config containment, structured evidence privacy, exact claims, dynamic concurrent leasing, host capability fallbacks, real overlapping worker processes, native package surfaces, Withdrawn graph semantics, and board/graph visualization.
+81 behavioral tests cover legacy adapters plus v3 decentralized IDs, engine-owned ADR/register creation, config containment, structured evidence privacy, exact claims, dynamic concurrent leasing, host capability fallbacks, real overlapping worker processes, native package surfaces, Withdrawn graph semantics, and board/graph visualization.
