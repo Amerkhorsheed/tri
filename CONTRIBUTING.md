@@ -19,7 +19,7 @@ A change is not one file. Find the row that matches what you touched and move ev
 | `scripts/tri.mjs` behaviour | `scripts/test-tri.mjs` or `scripts/test-v3.mjs` (test first, watch it fail), README if user-facing, `CHANGELOG.md`, `plugin.json` version |
 | A config option | README "Adopting an existing task tree", `docs/guide.html`, `templates/AGENTS-section.md` if an agent must know it, `CHANGELOG.md`, version |
 | Added a command | `commands/<name>.md` and `.toml`, README command table, `docs/guide.html` command table, `skills/tri-method/SKILL.md` if it changes the method, `CHANGELOG.md`, every host manifest version |
-| Changed how commands behave | Every affected `commands/*.md`, `SKILL.md`, `docs/guide.html`, `CHANGELOG.md`, version |
+| Added a host adapter | `scripts/host-capabilities.mjs`, `scripts/tri-host.mjs`, host tests, `docs/host-adapters.md`, `commands/run.md`, `SKILL.md`, README/guide install notes, `CHANGELOG.md`, every host manifest version |
 | The method itself | `SKILL.md`, `templates/AGENTS-section.md` (Codex parity), `docs/guide.html`, the SVG diagrams if the loop shape changed |
 | Test count | The README claim — `check-consistency.mjs` compares them |
 

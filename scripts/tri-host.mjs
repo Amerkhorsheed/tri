@@ -10,6 +10,8 @@ function detectedHost() {
   if (process.env.TRI_HOST) return process.env.TRI_HOST;
   if (process.env.PI_CODING_AGENT === 'true') return 'pi';
   if (process.env.CODEX_THREAD_ID || process.env.CODEX_HOME) return 'codex';
+  // Cursor may export Claude-adjacent vars; prefer CURSOR_AGENT before CLAUDECODE.
+  if (process.env.CURSOR_AGENT === '1') return 'cursor';
   if (process.env.CLAUDECODE === '1') return 'claude';
   if (process.env.GEMINI_CLI === '1') return 'gemini';
   if (process.env.ANTIGRAVITY_AGENT === '1') return 'antigravity';

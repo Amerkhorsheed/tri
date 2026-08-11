@@ -23,7 +23,7 @@ node ~/.tri/scripts/tri-host.mjs --json
 node ~/.tri/scripts/tri.mjs run-state --start "<scope>" --mode auto --capacity 4 --queue <IDs> --adapter <adapter> [--team-capable]
 ```
 
-Use an explicit host probe when auto-detection returns `generic`. Pass its `adapter` and optional team argument exactly. Gemini's bundled subagent is experimental: the probe selects `gemini-agents` only when settings prove it is enabled, otherwise it selects sequential `gemini`. Antigravity currently declares sequential because it has no verified programmable worker interface. Read the reported **adapter**, **backend**, and **actual** mode. Never describe a fallback as parallel.
+Use an explicit host probe when auto-detection returns `generic`. Pass its `adapter` and optional team argument exactly. Cursor is detected from `CURSOR_AGENT=1` and prefers that signal over Claude-adjacent env vars. Gemini's bundled subagent is experimental: the probe selects `gemini-agents` only when settings prove it is enabled, otherwise it selects sequential `gemini`. Antigravity currently declares sequential because it has no verified programmable worker interface. Read the reported **adapter**, **backend**, and **actual** mode. Never describe a fallback as parallel.
 
 Lease the next worker batch, then create a unique token for each active task with `tri.mjs claim-token <ID> --by <worker>`. Atomically push each returned token to its returned ref with an empty lease expectation:
 
@@ -39,6 +39,7 @@ Request a worker batch atomically with `run-state --lease worker-1,worker-2,...`
 
 - **Claude / `claude-agent`:** issue all `Agent` calls in one assistant turn with `tri-worker`, one per leased chain.
 - **Codex / `codex-spawn-agent`:** issue native `spawn_agent` calls together with `agent_type: tri_worker`; install it once with `~/.tri/scripts/install-codex-agent.sh` if absent.
+- **Cursor / `cursor-task-tri-worker`:** issue all Task tool calls in one assistant turn with `subagent_type: "tri-worker"`, one per leased chain. Pass task ID, worktree path, base commit, worker name, and exact paths in the prompt. Install once with `~/.tri/scripts/install-cursor.sh` if the skill or agent symlink is missing. Launch the leased batch together; do not implement in the orchestrator while workers are active.
 - **Pi / `pi-workers`:** call `tri_workers` once with the whole leased batch; it rejects duplicate worktrees, runs child Pi processes concurrently, propagates cancellation, and reports observed peak workers.
 - **Gemini / `gemini-subagent`:** invoke the bundled `tri-worker` subagent once per lease in one parallel tool batch. Require `experimental.enableAgents`; these workers run in YOLO mode, so distinct worktrees and exact scopes are mandatory.
 - **team / `claude-team`:** create one native Claude Code team only when TRI selected `team`.

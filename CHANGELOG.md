@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.2.0 — 2026-08-11
+
+- Added a first-class Cursor host adapter: `CURSOR_AGENT=1` detection, `cursor-task-tri-worker` parallel backend, and `scripts/install-cursor.sh` for the `tri-method` skill plus `~/.cursor/agents/tri-worker.md`.
+- Cursor wins host detection over Claude-adjacent environment variables so mixed IDE sessions do not silently claim the Claude backend.
+- Documented Cursor Task launch (`subagent_type: "tri-worker"`) in `/tri:run`, the method skill, host-adapter contract, and install surfaces.
+
 ## 3.1.2 — 2026-08-11
 
 - Allows `tri register` during active tracked edits so decisions and assumptions can be recorded in the same change they govern; Git conflict, detached-head, and branch-start protections remain enforced.
