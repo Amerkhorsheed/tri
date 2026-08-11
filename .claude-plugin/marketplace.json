@@ -5,7 +5,7 @@
     {
       "name": "tri",
       "source": "./",
-      "description": "TRI delivery method: task register, decision/assumption registers, ADRs, dynamic claiming for parallel devs, evidence-gated done, batch runs."
+      "description": "TRI v3: decentralized IDs, exact Git claims, structured evidence gates, automatic parallel workers/teams, and task visualization."
     }
   ]
 }

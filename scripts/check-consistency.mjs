@@ -3,6 +3,7 @@
 // The repository practises what it asks of projects: a change propagates or CI stops it.
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,6 +19,8 @@ const commands = readdirSync(join(ROOT, 'commands'))
 
 const readme = read('README.md');
 const guide = read('docs/guide.html');
+const skill = read('skills/tri-method/SKILL.md');
+const meta = JSON.parse(execFileSync('node', [join(ROOT, 'scripts/tri.mjs'), 'meta'], { encoding: 'utf8' }));
 
 for (const cmd of commands) {
   check(readme.includes(`/tri:${cmd}`), `README.md does not document /tri:${cmd}`);
@@ -44,29 +47,26 @@ for (const cmd of commands) {
     `commands/${cmd}.md changes the repository but declares no preflight tier`);
 }
 
-// --- 2c. no command references a command that no longer exists ---
-for (const cmd of commands) {
-  const body = read(`commands/${cmd}.md`);
+// --- 2c. no governing document references a command that no longer exists ---
+for (const [file, body] of [['README.md', readme], ['docs/guide.html', guide], ['skills/tri-method/SKILL.md', skill],
+  ...commands.map((cmd) => [`commands/${cmd}.md`, read(`commands/${cmd}.md`)])]) {
   for (const m of body.matchAll(/\`?\/tri:([a-z-]+)/g)) {
-    check(commands.includes(m[1]), `commands/${cmd}.md references /tri:${m[1]}, which is not a command`);
+    check(commands.includes(m[1]), `${file} references /tri:${m[1]}, which is not a command`);
   }
 }
 
-// --- 3. every config key the script reads is documented ---
-const script = read('scripts/tri.mjs');
-const configKeys = [...new Set([...script.matchAll(/\bcfg\.([a-zA-Z][a-zA-Z0-9]*)/g)].map((m) => m[1]))]
-  .filter((k) => !['root'].includes(k)); // root is derived, not user-set
-for (const key of configKeys) {
-  check(readme.includes(key), `README.md does not document the "${key}" config option`);
-}
+// --- 3. engine metadata is documented ---
+const configKeys = meta.configKeys;
+for (const key of configKeys) check(readme.includes(key), `README.md does not document the "${key}" config option`);
+for (const command of Object.keys(meta.commands)) check(readme.includes(command), `README.md does not name engine command "${command}"`);
 
 // --- 4. the version has a changelog entry ---
 const version = JSON.parse(read('.claude-plugin/plugin.json')).version;
 check(read('CHANGELOG.md').includes(`## ${version}`), `CHANGELOG.md has no section for version ${version}`);
 
 // --- 5. claimed test count matches reality ---
-const testFile = read('scripts/test-tri.mjs');
-const actualTests = (testFile.match(/^check\(/gm) ?? []).length;
+const testFiles = ['scripts/test-tri.mjs', 'scripts/test-v3.mjs'];
+const actualTests = testFiles.reduce((count, file) => count + (read(file).match(/^check\(/gm) ?? []).length, 0);
 const claimed = readme.match(/(\d+) behavioral tests/);
 check(claimed, 'README.md makes no test-count claim');
 if (claimed) {
@@ -94,4 +94,4 @@ if (errors.length) {
   for (const e of errors) console.error(`  - ${e}`);
   process.exit(1);
 }
-console.log(`consistency ok: ${commands.length} commands, ${configKeys.length} config keys, ${actualTests} tests, v${version}`);
+console.log(`consistency ok: ${commands.length} prompt commands, ${Object.keys(meta.commands).length} engine commands, ${configKeys.length} config keys, ${actualTests} tests, v${version}`);

@@ -9,5 +9,5 @@ A task is done only when all applicable conditions are evidenced:
 - API changes update and validate the versioned contract.
 - Unit, integration, contract, and failure-path tests required by the task pass.
 - Performance claims include benchmark context and actual results; no unsupported claim.
-- An evidence record exists at `tri/evidence/<TASK-ID>-<date>.md` with commands, output, residual risks, and rollback.
+- Every configured required check has a successful structured record in the declared environment; the Evidence section records residual risks and rollback.
 - `node <tri>/scripts/tri.mjs validate` passes.

@@ -12,6 +12,8 @@ const TRI = join(dirname(fileURLToPath(import.meta.url)), 'tri.mjs');
 let passed = 0, failed = 0;
 
 function run(cwd, args, expectFail = false) {
+  if (args[0] === 'init' && !args.includes('--id-strategy')) args = [...args, '--id-strategy', 'sequential'];
+  if (args[0] !== 'init' && existsSync(join(cwd, 'tri.config.json')) && !existsSync(join(cwd, '.git'))) initGit(cwd);
   try {
     const out = execFileSync('node', [TRI, ...args], { cwd, encoding: 'utf8' });
     if (expectFail) throw new Error(`expected failure, got success:\n${out}`);
@@ -24,6 +26,10 @@ function run(cwd, args, expectFail = false) {
 
 function gitRun(cwd, args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8' });
+}
+
+function recordEvidence(cwd, id, name = 'test') {
+  return run(cwd, ['evidence', id, '--name', name, '--', 'node', '-e', 'process.exit(0)']);
 }
 
 function initGit(cwd) {
@@ -147,7 +153,7 @@ check('claim writes explicit machine-readable scope manifest', () => {
 });
 
 check('claim refuses overlap with existing task scope', () => {
-  run(ws, ['release', 'T-0001']);
+  run(ws, ['release', 'T-0001', '--by', 'dev-a']);
   run(ws, ['claim', 'T-0001', '--by', 'dev-a']);
   const scopeFile = join(ws, 'overlap.json');
   writeFileSync(scopeFile, JSON.stringify({ schemaVersion: 1, owner: 'dev-c', kind: 'task', primaryTasks: ['T-0002'], coveredTasks: ['T-0001'], mayCover: [], responsibilities: [], relatedADRs: [] }));
@@ -172,7 +178,7 @@ check('claim of a not-ready task warns but succeeds (advisory, never blocks)', (
 });
 
 check('release returns a task to Planned and clears assignee', () => {
-  run(ws, ['release', 'T-0005']);
+  run(ws, ['release', 'T-0005', '--by', 'dev-b']);
   const t = readFileSync(join(ws, 'tri/tasks/phase-02/T-0005.md'), 'utf8');
   assertIncludes(t, 'Planned');
   assert(!t.includes('dev-b'), 'assignee not cleared');
@@ -193,6 +199,7 @@ check('done succeeds once Evidence is filled, and unblocks dependents', () => {
   const p = join(ws, 'tri/tasks/phase-01/T-0001.md');
   writeFileSync(p, readFileSync(p, 'utf8').replace(
     '## Evidence\n\nN/A', '## Evidence\n\n- `npm test` 14/14 pass; schema migration applied and rolled back cleanly.'));
+  recordEvidence(ws, 'T-0001');
   const out = run(ws, ['done', 'T-0001']);
   assertIncludes(out, 'Done');
   const next = run(ws, ['next']);
@@ -269,7 +276,7 @@ check('adapter: strict done gate honors configured evidenceDir', () => {
   writeFileSync(p, readFileSync(p, 'utf8').replace('## Evidence\n\nN/A', '## Evidence\n\n- suite 9/9 pass'));
   const refused = run(ws2, ['done', 'TASK-0002'], true);
   assertIncludes(refused, 'docs/evidence');
-  writeFileSync(join(ws2, 'docs/evidence/TASK-0002-20260805.md'), 'evidence');
+  recordEvidence(ws2, 'TASK-0002');
   const out = run(ws2, ['done', 'TASK-0002']);
   assertIncludes(out, 'Done');
 });
@@ -421,6 +428,7 @@ check('new-task reports collision-safe remote/default-branch allocation', () => 
 
 check('release refuses to take another developer\'s claim without --force', () => {
   run(ws4, ['claim', 'T-0001', '--by', 'dev-a']);
+  assertIncludes(run(ws4, ['release', 'T-0001'], true), '--by');
   const refused = run(ws4, ['release', 'T-0001', '--by', 'dev-b'], true);
   assertIncludes(refused, 'dev-a');
   const forced = run(ws4, ['release', 'T-0001', '--by', 'dev-b', '--force']);
@@ -447,6 +455,9 @@ check('run-state records a batch and survives to be resumed', () => {
   assert(state.queue.length === 3, `queue not recorded: ${JSON.stringify(state)}`);
   assert(state.scope === 'phase 01' && state.mode === 'sequential', 'scope/mode not recorded');
 
+  run(ws4, ['run-state', '--lease', 'worker-1']);
+  const firstTask = join(ws4, 'tri/tasks/phase-01/T-0001.md');
+  writeFileSync(firstTask, readFileSync(firstTask, 'utf8').replace('## Status\n\nPlanned', '## Status\n\nDone'));
   run(ws4, ['run-state', '--done', 'T-0001']);
   run(ws4, ['run-state', '--blocked', 'T-0002']);
   const resumed = run(ws4, ['run-state']);
@@ -610,6 +621,7 @@ check('a dependency on a Withdrawn task does not deadlock frontier or done', () 
   writeFileSync(p, orig.replace('## Acceptance criteria', '## Evidence\n\n- follow-up verified against retained record\n\n## Acceptance criteria'));
   assertIncludes(run(ws, ['next']), 'T-0009');
   run(ws, ['claim', 'T-0009', '--by', 'dev-a']);
+  recordEvidence(ws, 'T-0009');
   const out = run(ws, ['done', 'T-0009']);
   assertIncludes(out, 'dependencies Withdrawn: T-0008');
   assertIncludes(out, 'T-0009 marked Done');
@@ -626,7 +638,7 @@ check('validate flags a single placeholder objective instead of waiting for a ma
   writeFileSync(join(dir, 'T-0004.md'), '# T-0004: Add dark mode\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Objective\n\nShip a dark colour scheme with contrast checks.\n\n## Acceptance criteria\n\n- contrast passes\n');
   const out = run(w, ['validate']);
   assertIncludes(out, 'T-0001: Objective restates the title verbatim');
-  assert(!out.includes('T-0002'), 'legitimate objective containing its title was flagged');
+  assert(!out.includes('T-0002: Objective restates'), 'legitimate objective containing its title was flagged');
 });
 
 check('evidence from a mixture of environments warns about the mismatching run', () => {
@@ -636,7 +648,7 @@ check('evidence from a mixture of environments warns about the mismatching run',
   mkdirSync(join(w, 'tri/evidence'), { recursive: true });
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'T-0001.md'), '# T-0001: Verify build\n\n## Status\n\nPlanned\n\n## Dependencies\n\nN/A\n\n## Evidence\n\n- suite passes\n\n## Acceptance criteria\n\n- green\n');
-  writeFileSync(join(w, 'tri/evidence/T-0001-20260806.md'), '# Evidence: T-0001\n\n## Execution context (2026-08-06T00:00:00Z)\n\n```json\n{"command":["npm","test"],"context":{"node":"v18.21.3"}}\n```\n\n## Execution context (2026-08-06T00:00:01Z)\n\n```json\n{"command":["npm","test"],"context":{"node":"v24.0.0"}}\n```\n');
+  writeFileSync(join(w, 'tri/evidence/T-0001-20260806.md'), '# Evidence: T-0001\n\n## Execution context (2026-08-06T00:00:00Z)\n\n```json\n{"command":["npm","test"],"exitStatus":0,"context":{"node":"v18.21.3"}}\n```\n\n## Execution context (2026-08-06T00:00:01Z)\n\n```json\n{"command":["npm","test"],"exitStatus":0,"context":{"node":"v24.0.0"}}\n```\n');
   run(w, ['claim', 'T-0001', '--by', 'dev-a']);
   const out = run(w, ['done', 'T-0001']);
   assertIncludes(out, 'Evidence runtime differs from expected environment');

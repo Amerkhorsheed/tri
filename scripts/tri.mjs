@@ -1,21 +1,40 @@
 #!/usr/bin/env node
 // tri — task register + evidence-gated delivery. Zero dependencies, Node >= 18.
-// Commands: init, new-task, validate, next, claim, release, done, status, graph.
+// Run `tri.mjs meta` for the authoritative command and configuration contract.
 
 import {
-  readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, appendFileSync, rmSync,
+  readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, appendFileSync, rmSync, renameSync,
 } from 'node:fs';
-import { join, dirname, resolve, basename, relative } from 'node:path';
+import { join, dirname, resolve, basename, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import os from 'node:os';
+import { createHash, randomBytes } from 'node:crypto';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const TEMPLATES = join(SCRIPT_DIR, '..', 'templates');
 const STATUSES = ['Planned', 'In Progress', 'Blocked', 'Done', 'Withdrawn'];
 const SPECIFICATION_STATUSES = ['Unrevised', 'Specified', 'Withdrawn'];
-const RUN_MODES = ['sequential', 'parallel', 'team'];
+const RUN_MODES = ['auto', 'sequential', 'parallel', 'team'];
 const PROFILES = ['lite', 'standard', 'strict'];
+const ID_STRATEGIES = ['random', 'sequential'];
+const CONFIG_KEYS = new Set([
+  'version', 'profile', 'taskDir', 'idPrefix', 'idWidth', 'idStrategy', 'statuses', 'evidenceDir',
+  'taskTemplate', 'companionFiles', 'companions', 'companionHooks', 'claimScope', 'adrDir',
+  'decisionFiles', 'runtimeProbes', 'expectedEnvironment', 'requiredChecks',
+  'requireRemoteReservations', 'remote', 'defaultBranch', 'baseBranch', 'workflow',
+]);
+const COMMAND_META = {
+  init: { mutates: true, git: false }, 'new-task': { mutates: true, clean: true }, validate: {}, next: {},
+  claim: { mutates: true, clean: true, claim: true }, release: { mutates: true }, done: { mutates: true },
+  status: {}, graph: {}, visualize: { scratch: true }, 'run-state': { mutates: true }, sync: {},
+  evidence: { mutates: true }, companions: {}, doctor: {}, rebaseline: { mutates: true },
+  'new-adr': { mutates: true, clean: true }, register: { mutates: true, clean: true }, 'verify-scope': {},
+  'claim-ref': {}, 'claim-token': {}, meta: {},
+};
+const META = {
+  version: '3.0.0', profiles: PROFILES, statuses: STATUSES, specificationStatuses: SPECIFICATION_STATUSES,
+  runModes: RUN_MODES, idStrategies: ID_STRATEGIES, configKeys: [...CONFIG_KEYS].sort(), commands: COMMAND_META,
+};
 const REBASELINE_LAYERS = [
   { id: 'charter', label: 'charter', paths: ['PROJECT_CHARTER.md'] },
   { id: 'adrs-registers', label: 'ADRs and registers', paths: ['tri/adr/**', 'tri/DECISIONS.md', 'tri/ASSUMPTIONS.md'] },
@@ -23,11 +42,20 @@ const REBASELINE_LAYERS = [
   { id: 'agent-facing', label: 'agent-facing documents', paths: ['AGENTS.md', 'CONTRIBUTING.md', '.claude/rules/**', '.agents/skills/**'] },
   { id: 'tasks', label: 'tasks', paths: ['tri/tasks/**', 'tasks/**'] },
 ];
-const REGISTER_ID_RE = /\b([DBA]-\d+)\b/g;
-const ADR_ID_RE = /\b(ADR-\d+)\b/gi;
+const ID_PART_SOURCE = '(?:[0-9A-HJKMNP-TV-Z]{13}|\\d+)';
+const REGISTER_ID_RE = new RegExp(`\\b([DBA]-${ID_PART_SOURCE})\\b`, 'g');
+const ADR_ID_RE = new RegExp(`\\b(ADR-${ID_PART_SOURCE})\\b`, 'gi');
+const RANDOM_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+const EVIDENCE_MAX_BYTES = 4 * 1024 * 1024;
 
 function fail(msg) { console.error(msg); process.exit(1); }
 function out(msg) { console.log(msg); }
+function atomicWrite(path, text) {
+  mkdirSync(dirname(path), { recursive: true });
+  const temp = `${path}.tmp-${process.pid}`;
+  writeFileSync(temp, text);
+  renameSync(temp, path);
+}
 
 function validateArgv(value, label) {
   if (!Array.isArray(value) || !value.length || value.some((part) => typeof part !== 'string' || !part.trim())) {
@@ -46,7 +74,7 @@ function validateRuntimeProbes(probes) {
 }
 
 function validateRepoRelativePath(value, label) {
-  if (typeof value !== 'string' || !value.trim() || value.startsWith('/') || value.split(/[\\/]+/).includes('..')) {
+  if (typeof value !== 'string' || !value.trim() || isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value) || value.split(/[\\/]+/).includes('..')) {
     fail(`${label} must be a non-empty repository-relative path`);
   }
 }
@@ -88,6 +116,35 @@ function findRoot(from = process.cwd()) {
     dir = parent;
   }
 }
+function validateConfig(cfg) {
+  if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) fail('tri.config.json must contain an object');
+  for (const key of Object.keys(cfg)) {
+    if (key !== 'root' && !CONFIG_KEYS.has(key) && !key.startsWith('x-')) fail(`tri.config.json: unknown option "${key}" (extensions must start with x-)`);
+  }
+  if (!PROFILES.includes(cfg.profile)) fail(`profile must be ${PROFILES.join('|')}`);
+  if (!ID_STRATEGIES.includes(cfg.idStrategy)) fail(`idStrategy must be ${ID_STRATEGIES.join('|')}`);
+  if (!['trunk', 'branch-pr'].includes(cfg.workflow)) fail('workflow must be trunk|branch-pr');
+  if (!Number.isInteger(cfg.idWidth) || cfg.idWidth < 1 || cfg.idWidth > 12) fail('idWidth must be an integer from 1 to 12');
+  if (typeof cfg.idPrefix !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(cfg.idPrefix)) fail('idPrefix must be 1–32 letters, digits, underscores, or hyphens and start with a letter');
+  for (const [key, value] of [['taskDir', cfg.taskDir], ['evidenceDir', cfg.evidenceDir], ['adrDir', cfg.adrDir]]) {
+    validateRepoRelativePath(value, key);
+  }
+  if (cfg.taskTemplate !== undefined) validateRepoRelativePath(cfg.taskTemplate, 'taskTemplate');
+  if (!Array.isArray(cfg.decisionFiles)) fail('decisionFiles must be an array of repository-relative paths');
+  cfg.decisionFiles.forEach((path, i) => validateRepoRelativePath(path, `decisionFiles[${i}]`));
+  if (!Array.isArray(cfg.statuses) || cfg.statuses.some((status) => typeof status !== 'string' || !status.trim())) fail('statuses must be an array of non-empty strings');
+  if (!Array.isArray(cfg.requiredChecks) || cfg.requiredChecks.some((name) => typeof name !== 'string' || !name.trim())) fail('requiredChecks must be an array of evidence check names');
+  if (new Set(cfg.requiredChecks).size !== cfg.requiredChecks.length) fail('requiredChecks must not contain duplicates');
+  if (cfg.expectedEnvironment !== null && (!cfg.expectedEnvironment || typeof cfg.expectedEnvironment !== 'object' || Array.isArray(cfg.expectedEnvironment))) fail('expectedEnvironment must be null or an object');
+  if (!cfg.claimScope || typeof cfg.claimScope !== 'object' || Array.isArray(cfg.claimScope)) fail('claimScope must be an object');
+  if (cfg.claimScope.directory !== undefined) validateRepoRelativePath(cfg.claimScope.directory, 'claimScope.directory');
+}
+
+function requireGit(root) {
+  const repository = spawnSync('git', ['rev-parse', '--git-dir'], { cwd: root, encoding: 'utf8' });
+  if (repository.status !== 0) fail('TRI v3 requires a Git repository after init');
+}
+
 function loadConfig() {
   const root = findRoot();
   if (!root) fail('no tri.config.json found — run `tri init` in the project root first');
@@ -97,21 +154,43 @@ function loadConfig() {
   } catch (e) {
     fail(`tri.config.json is not valid JSON: ${e.message}`);
   }
+  const version = cfg.version ?? 1;
   const statuses = [...new Set([...(cfg.statuses ?? STATUSES), 'Withdrawn'])];
   const merged = {
-    root, idPrefix: 'T-', idWidth: 4, evidenceDir: 'tri/evidence',
-    statuses, companionFiles: [], companions: [], companionHooks: {}, claimScope: {},
-    adrDir: 'tri/adr', decisionFiles: ['tri/DECISIONS.md', 'tri/ASSUMPTIONS.md'],
-    runtimeProbes: [], expectedEnvironment: null, ...cfg,
-    statuses,
+    version, root, profile: 'standard', taskDir: 'tri/tasks', idPrefix: 'T-', idWidth: 4,
+    idStrategy: version >= 2 ? 'random' : 'sequential', evidenceDir: 'tri/evidence', statuses,
+    companionFiles: [], companions: [], companionHooks: {}, claimScope: {}, adrDir: 'tri/adr',
+    decisionFiles: ['tri/DECISIONS.md', 'tri/ASSUMPTIONS.md'], runtimeProbes: [], expectedEnvironment: null,
+    requiredChecks: [], workflow: 'trunk', ...cfg, statuses,
   };
+  validateConfig(merged);
   validateRuntimeProbes(merged.runtimeProbes);
   validateCompanionConfig(merged);
+  requireGit(root);
   return merged;
 }
 
+function projectPreflight(cfg, { clean = false, start = false } = {}) {
+  for (const marker of ['MERGE_HEAD', 'CHERRY_PICK_HEAD']) {
+    const path = git(['rev-parse', '--git-path', marker], cfg.root).stdout.trim();
+    if (existsSync(resolve(cfg.root, path))) fail(`Git operation in progress (${marker}); finish or abort it first`);
+  }
+  for (const marker of ['rebase-merge', 'rebase-apply']) {
+    const path = git(['rev-parse', '--git-path', marker], cfg.root).stdout.trim();
+    if (existsSync(resolve(cfg.root, path))) fail('Git rebase in progress; finish or abort it first');
+  }
+  const branch = git(['branch', '--show-current'], cfg.root).stdout.trim();
+  if (!branch) fail('detached HEAD; move to a branch before changing TRI state');
+  if (clean) {
+    const dirty = git(['status', '--porcelain', '--untracked-files=no'], cfg.root).stdout.trim();
+    if (dirty) fail(`tracked worktree changes must be committed or stashed before starting new TRI work:\n${dirty}`);
+  }
+  const defaultBranch = cfg.defaultBranch ?? cfg.baseBranch ?? 'main';
+  if (start && cfg.workflow === 'branch-pr' && branch === defaultBranch) fail(`branch-pr workflow cannot start work on ${defaultBranch}; create a work branch first`);
+}
+
 function git(args, cwd, allowFailure = false) {
-  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   if (result.status !== 0 && !allowFailure) {
     fail(`git ${args.join(' ')} failed: ${(result.stderr || result.stdout || 'unknown error').trim()}`);
   }
@@ -169,14 +248,12 @@ function definitionIdentifiers(cfg, file, text) {
   const ids = new Map();
   const taskName = basename(file, '.md');
   const escapedPrefix = cfg.idPrefix.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
-  if (new RegExp(`^${escapedPrefix}\\d+$`).test(taskName)) ids.set(taskName, `${file}:name`);
-  const adrName = basename(file).match(/^(ADR-\d+)(?:[-_].*)?\.md$/i);
+  if (new RegExp(`^${escapedPrefix}${ID_PART_SOURCE}$`, 'i').test(taskName)) ids.set(taskName.toUpperCase(), `${file}:name`);
+  const adrName = basename(file).match(new RegExp(`^(ADR-${ID_PART_SOURCE})(?:[-_].*)?\\.md$`, 'i'));
   if (adrName) ids.set(adrName[1].toUpperCase(), `${file}:name`);
-  for (const match of text.matchAll(/^#\s+(ADR-\d+)\b/gmi)) ids.set(match[1].toUpperCase(), `${file}:${match.index}`);
-  for (const match of text.matchAll(/^\s*\|\s*((?:D|B|A)-\d+)\b/gm)) ids.set(match[1], `${file}:${match.index}`);
-  for (const match of text.matchAll(/^\s*(?:#{1,6}\s*)?((?:D|B|A)-\d+)\b/gm)) {
-    ids.set(match[1], `${file}:${match.index}`);
-  }
+  for (const match of text.matchAll(new RegExp(`^#\\s+(ADR-${ID_PART_SOURCE})\\b`, 'gmi'))) ids.set(match[1].toUpperCase(), `${file}:${match.index}`);
+  for (const match of text.matchAll(new RegExp(`^\\s*\\|\\s*((?:D|B|A)-${ID_PART_SOURCE})\\b`, 'gm'))) ids.set(match[1].toUpperCase(), `${file}:${match.index}`);
+  for (const match of text.matchAll(new RegExp(`^\\s*(?:#{1,6}\\s*)?((?:D|B|A)-${ID_PART_SOURCE})\\b`, 'gm'))) ids.set(match[1].toUpperCase(), `${file}:${match.index}`);
   return ids;
 }
 
@@ -308,12 +385,47 @@ function globToRegExp(glob) {
 function pathMatches(path, patterns) { return patterns.some((pattern) => globToRegExp(pattern).test(path)); }
 function validatePathList(scope, field, file) {
   const values = scopeList(scope[field], field, file);
-  for (const value of values) if (value.startsWith('/') || value.includes('..')) fail(`claim scope ${file}: ${field} must use repository-relative paths`);
+  for (const value of values) {
+    if (isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value) || value.split(/[\\/]+/).includes('..')) fail(`claim scope ${file}: ${field} must use repository-relative paths`);
+    if (/[*?[\]{}]/.test(value)) fail(`claim scope ${file}: ${field} does not support globs; use an exact file or a directory ending in /`);
+  }
   return values;
 }
 function claimManifestPath(cfg, id) {
   const dir = cfg.claimScope?.directory ?? '.tri/claims';
   return join(cfg.root, dir, `${id}.json`);
+}
+function claimRef(id) { return `refs/heads/tri/claims/${id}`; }
+function remoteClaimHead(cfg, id) {
+  const remote = cfg.remote ?? 'origin';
+  const result = git(['ls-remote', '--heads', remote, claimRef(id)], cfg.root, true);
+  if (result.status !== 0 || result.error) fail(`cannot verify remote claim ${claimRef(id)} on ${remote}`);
+  return result.stdout.trim().split(/\s+/)[0] || null;
+}
+function requireRemoteClaim(cfg, id, owner) {
+  if (cfg.workflow !== 'branch-pr') return;
+  const head = git(['rev-parse', 'HEAD'], cfg.root).stdout.trim();
+  const remoteHead = remoteClaimHead(cfg, id);
+  if (!remoteHead) fail(`${id} is not remotely reserved; create and push a claim token first`);
+  const token = git(['cat-file', '-p', remoteHead], cfg.root, true);
+  if (token.status !== 0 || !token.stdout.includes(`parent ${head}\n`) || !token.stdout.includes(`TRI claim ${id}\n`)
+    || !token.stdout.includes(`owner ${owner}\n`)) {
+    fail(`${id} remote claim is not a token for current HEAD ${head}`);
+  }
+  return { token: remoteHead, base: head };
+}
+function requireCompletionClaim(cfg, task) {
+  if (cfg.workflow !== 'branch-pr') return;
+  const scopePath = claimManifestPath(cfg, task.id);
+  if (!existsSync(scopePath)) fail(`${task.id}: local claim scope is missing`);
+  const scope = validateClaimScope(cfg, readClaimManifest(scopePath), loadTasks(cfg), scopePath);
+  const remoteHead = remoteClaimHead(cfg, task.id);
+  if (!remoteHead || remoteHead !== scope.claimToken) fail(`${task.id}: active remote claim token is missing or changed`);
+  const token = git(['cat-file', '-p', remoteHead], cfg.root, true);
+  if (token.status !== 0 || !token.stdout.includes(`owner ${task.assignee}\n`)) fail(`${task.id}: active remote claim owner differs from ${task.assignee}`);
+}
+function requireReleasedRemoteClaim(cfg, id) {
+  if (cfg.workflow === 'branch-pr' && remoteClaimHead(cfg, id)) fail(`delete remote ${claimRef(id)} before releasing ${id}`);
 }
 function listClaimManifests(cfg) {
   const dir = join(cfg.root, cfg.claimScope?.directory ?? '.tri/claims');
@@ -335,7 +447,9 @@ function scopeList(value, field, file) {
 }
 function validateClaimScope(cfg, scope, tasks, file = '<scope>') {
   if (scope.schemaVersion !== 1) fail(`claim scope ${file}: schemaVersion must be 1`);
-  if (typeof scope.owner !== 'string' || !scope.owner.trim()) fail(`claim scope ${file}: owner required`);
+  if (typeof scope.owner !== 'string' || !scope.owner.trim() || /[\r\n]/.test(scope.owner)) fail(`claim scope ${file}: owner must be one non-empty line`);
+  if (scope.attempt === undefined) scope.attempt = createHash('sha256').update(`${file}:${scope.owner}`).digest('hex').slice(0, 24);
+  if (typeof scope.attempt !== 'string' || !/^[a-f0-9]{24}$/.test(scope.attempt)) fail(`claim scope ${file}: attempt must be a 24-character hex identifier`);
   if (!CLAIM_KINDS.includes(scope.kind)) fail(`claim scope ${file}: kind must be ${CLAIM_KINDS.join(', ')}`);
   const primary = scopeList(scope.primaryTasks, 'primaryTasks', file);
   if (!primary.length) fail(`claim scope ${file}: primaryTasks must not be empty`);
@@ -356,7 +470,10 @@ function validateClaimScope(cfg, scope, tasks, file = '<scope>') {
   return { ...scope, primaryTasks: primary, coveredTasks: covered, mayCover, responsibilities, relatedADRs: adrs, writePaths, readPaths, forbiddenPaths, sharedPaths };
 }
 function patternsOverlap(left, right) {
-  return pathMatches(left, [right]) || pathMatches(right, [left]);
+  const a = left.replace(/^\.\//, '');
+  const b = right.replace(/^\.\//, '');
+  if (a === b) return true;
+  return (a.endsWith('/') && b.startsWith(a)) || (b.endsWith('/') && a.startsWith(b));
 }
 function scopeConflicts(candidate, existing) {
   const conflicts = [];
@@ -391,11 +508,16 @@ function checkClaimScope(cfg, candidate, tasks, ignoreFile) {
 }
 function claimScopeFor(cfg, id, by, args, tasks) {
   const supplied = argValue(args, '--scope');
+  const task = tasks.find((entry) => entry.id === id);
   const scope = supplied ? readClaimManifest(resolve(cfg.root, supplied)) : {
-    schemaVersion: 1, owner: by, branch: process.env.GIT_BRANCH ?? null, claimCommit: process.env.GIT_COMMIT ?? null, kind: 'task', primaryTasks: [id], coveredTasks: [], mayCover: [], responsibilities: [], relatedADRs: [], writePaths: [], readPaths: [], forbiddenPaths: [], sharedPaths: [], baseBranch: cfg.baseBranch ?? null,
+    schemaVersion: 1, owner: by, attempt: randomBytes(12).toString('hex'), branch: process.env.GIT_BRANCH ?? null,
+    claimCommit: process.env.GIT_COMMIT ?? null, kind: 'task', primaryTasks: [id], coveredTasks: [], mayCover: [],
+    responsibilities: [], relatedADRs: [], writePaths: taskExpectedFiles(task), readPaths: [], forbiddenPaths: [],
+    sharedPaths: [], baseBranch: cfg.baseBranch ?? null,
   };
   if (!scope.primaryTasks?.length) scope.primaryTasks = [id];
   if (!scope.owner) scope.owner = by;
+  if (!scope.attempt) scope.attempt = randomBytes(12).toString('hex');
   const checked = validateClaimScope(cfg, scope, tasks, supplied ?? claimManifestPath(cfg, id));
   if (checked.owner !== by && !args.includes('--force')) fail(`claim scope owner ${checked.owner} differs from --by ${by}`);
   if (!checked.primaryTasks.includes(id)) fail(`claim scope primaryTasks must include ${id}`);
@@ -406,12 +528,12 @@ function claimScopeFor(cfg, id, by, args, tasks) {
 // ---------- task parsing ----------
 function idRegex(cfg, anchored = false) {
   const esc = cfg.idPrefix.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
-  return new RegExp(anchored ? `^${esc}\\d+\\.md$` : `${esc}\\d+`, anchored ? '' : 'g');
+  return new RegExp(anchored ? `^${esc}${ID_PART_SOURCE}\\.md$` : `${esc}${ID_PART_SOURCE}(?![0-9A-Z])`, anchored ? 'i' : 'gi');
 }
 
 function isTaskId(cfg, value) {
   const escaped = cfg.idPrefix.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
-  return typeof value === 'string' && new RegExp(`^${escaped}\\d+$`).test(value);
+  return typeof value === 'string' && new RegExp(`^${escaped}${ID_PART_SOURCE}$`, 'i').test(value);
 }
 
 function taskArgument(cfg, args, usage) {
@@ -452,7 +574,7 @@ function parseTask(file, cfg) {
     specificationStatus: sections['Specification status'] ?? 'Specified',
     assignee: sections['Assignee'] ?? 'N/A',
     priority: sections['Priority'] ?? 'P1',
-    title: (text.match(new RegExp(`^# ${cfg.idPrefix.replace(/[-]/g, '\\-')}\\d+:\\s*(.+)$`, 'm')) ?? [,''])[1],
+    title: (text.match(new RegExp(`^# ${cfg.idPrefix.replace(/[-]/g, '\\-')}${ID_PART_SOURCE}:\\s*(.+)$`, 'mi')) ?? [,''])[1],
     deps: [...new Set(deps.filter((d) => d !== id))],
   };
 }
@@ -505,7 +627,7 @@ function updateSections(task, values) {
     updated = replaceSectionText(updated, name, value);
     if (updated === null) fail(`${task.id}: could not update section "${name}"`);
   }
-  writeFileSync(task.file, updated);
+  atomicWrite(task.file, updated);
 }
 
 function insertSection(text, after, name, value) {
@@ -521,7 +643,7 @@ function insertSection(text, after, name, value) {
 function setSection(task, name, value) {
   const updated = replaceSectionText(task.text, name, value);
   if (updated === null) fail(`${task.id}: could not update section "${name}"`);
-  writeFileSync(task.file, updated);
+  atomicWrite(task.file, updated);
 }
 
 function byId(tasks) {
@@ -543,14 +665,22 @@ function readyTasks(tasks, map) {
     && t.deps.every((d) => depSatisfied(map.get(d))));
 }
 
-function nextNumericId(cfg, prefix, tasks = loadTasks(cfg)) {
-  const local = new Set();
+function randomId(prefix, used = new Set()) {
+  for (;;) {
+    let value = BigInt(`0x${randomBytes(8).toString('hex')}`);
+    let part = '';
+    for (let i = 0; i < 13; i++) { part = RANDOM_ALPHABET[Number(value & 31n)] + part; value >>= 5n; }
+    const id = `${prefix}${part}`;
+    if (!used.has(id)) return id;
+  }
+}
+
+function nextId(cfg, prefix, tasks = loadTasks(cfg)) {
+  const localIds = new Set(localIdentifierMap(cfg, tasks).keys());
+  if (cfg.idStrategy === 'random') return randomId(prefix, localIds);
   const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
   const re = new RegExp(`^${escapedPrefix}(\\d+)$`);
-  for (const id of localIdentifierMap(cfg, tasks).keys()) {
-    const match = id.match(re);
-    if (match) local.add(Number(match[1]));
-  }
+  const local = new Set([...localIds].map((id) => id.match(re)).filter(Boolean).map((match) => Number(match[1])));
   const used = numericIdSet(cfg, prefix, tasks);
   let n = local.size ? Math.max(...local) + 1 : 1;
   while (used.has(n)) n += 1;
@@ -595,26 +725,31 @@ function runtimeValue(command, cwd) {
   return { command, status: result.status, output: (result.stdout || result.stderr || '').trim().split(/\r?\n/)[0] };
 }
 
-function evidenceContext(cfg) {
+function evidenceContext(cfg, id) {
   const commit = git(['rev-parse', 'HEAD'], cfg.root, true);
   const branch = git(['branch', '--show-current'], cfg.root, true);
   const probes = (cfg.runtimeProbes ?? []).map((probe) => {
     const command = Array.isArray(probe) ? probe : probe.command;
     return runtimeValue(command, cfg.root);
   });
+  let attempt = null; let claimToken = null;
+  const scope = id ? claimManifestPath(cfg, id) : null;
+  if (scope && existsSync(scope)) {
+    const claim = validateClaimScope(cfg, readClaimManifest(scope), loadTasks(cfg), scope);
+    attempt = claim.attempt; claimToken = claim.claimToken ?? null;
+  }
   return {
-    capturedAt: new Date().toISOString(),
+    capturedAt: new Date().toISOString(), attempt, claimToken,
     commit: commit.status === 0 ? commit.stdout.trim() : null,
     branch: branch.status === 0 ? branch.stdout.trim() : null,
-    hostname: os.hostname(),
-    containerId: process.env.HOSTNAME ?? null,
+    tri: META.version,
     node: process.version,
     platform: `${process.platform}-${process.arch}`,
     probes,
   };
 }
 
-function appendEvidenceContext(cfg, id, command, result, context = evidenceContext(cfg)) {
+function appendEvidenceContext(cfg, id, command, result, context = evidenceContext(cfg, id)) {
   const evDir = join(cfg.root, cfg.evidenceDir);
   mkdirSync(evDir, { recursive: true });
   const date = context.capturedAt.slice(0, 10).replaceAll('-', '');
@@ -622,24 +757,23 @@ function appendEvidenceContext(cfg, id, command, result, context = evidenceConte
   const existing = existsSync(path) ? readFileSync(path, 'utf8') : `# Evidence: ${id}\n\n`;
   const fence = '```';
   const block = `## Execution context (${context.capturedAt})\n\n${fence}json\n${JSON.stringify({ command, ...result, context }, null, 2)}\n${fence}\n`;
-  writeFileSync(path, existing.includes('## Execution context') ? `${existing}\n${block}` : `${existing.trimEnd()}\n\n${block}`);
+  atomicWrite(path, existing.includes('## Execution context') ? `${existing}\n${block}` : `${existing.trimEnd()}\n\n${block}`);
   return path;
 }
 
-function evidenceContexts(text) {
-  const contexts = [];
+function evidenceRecords(text) {
+  const records = [];
   const pattern = /## Execution context[^\n]*\n\n```json\n([\s\S]*?)\n```/g;
   for (const match of text.matchAll(pattern)) {
     try {
       const record = JSON.parse(match[1]);
-      if (record.context && typeof record.context === 'object') contexts.push(record.context);
+      if (record.context && typeof record.context === 'object') records.push(record);
     } catch {
-      // Keep legacy/prose evidence readable; caller reports malformed structured context.
+      // Legacy prose remains readable but cannot satisfy a v3 evidence gate.
     }
   }
-  return contexts;
+  return records;
 }
-
 function expectedEnvironmentMismatches(expected, actual) {
   if (!expected || typeof expected !== 'object') return [];
   const mismatches = [];
@@ -653,33 +787,66 @@ function expectedEnvironmentMismatches(expected, actual) {
   return mismatches;
 }
 
-function evidenceWarnings(cfg, task) {
-  if (!task.sections['Evidence'] || task.sections['Evidence'] === 'N/A') return ['Evidence has no recorded execution context'];
+function taskEvidenceRecords(cfg, task) {
   const evDir = join(cfg.root, cfg.evidenceDir);
-  const files = existsSync(evDir) ? readdirSync(evDir).filter((f) => f.startsWith(task.id) && f.endsWith('.md')) : [];
-  if (!files.length) return ['Evidence record has no execution context file'];
-  const text = files.map((f) => readFileSync(join(evDir, f), 'utf8')).join('\n');
-  const contexts = evidenceContexts(text);
-  if (!contexts.length) return ['Evidence record lacks structured execution context'];
-  const warnings = [];
-  if (cfg.expectedEnvironment) {
-    const mismatches = contexts.flatMap((context) => expectedEnvironmentMismatches(cfg.expectedEnvironment, context));
-    if (mismatches.length) {
-      warnings.push(`Evidence runtime differs from expected environment: ${[...new Set(mismatches)].join('; ')}`);
-    }
+  const prefix = `${task.id}-`;
+  const files = existsSync(evDir) ? readdirSync(evDir).filter((f) => f.startsWith(prefix) && f.endsWith('.md')) : [];
+  return files.flatMap((f) => evidenceRecords(readFileSync(join(evDir, f), 'utf8')));
+}
+
+function evidenceGateErrors(cfg, task) {
+  if (cfg.profile === 'lite') return [];
+  const records = taskEvidenceRecords(cfg, task);
+  const scope = claimManifestPath(cfg, task.id);
+  const attempt = existsSync(scope) ? validateClaimScope(cfg, readClaimManifest(scope), loadTasks(cfg), scope).attempt : null;
+  const successful = records.filter((record) => record.exitStatus === 0 && !record.signal && !record.error
+    && (record.context?.attempt === attempt || (cfg.version < 2 && !record.context?.attempt)));
+  const errors = [];
+  if (!successful.length) errors.push(`requires at least one successful structured evidence record at ${cfg.evidenceDir}/${task.id}-<date>.md from \`tri evidence\``);
+  for (const name of cfg.requiredChecks) {
+    if (!successful.some((record) => record.check === name)) errors.push(`required evidence check "${name}" has no successful record`);
   }
-  return warnings;
+  if (cfg.profile === 'strict' && cfg.expectedEnvironment) {
+    const mismatches = successful.flatMap((record) => expectedEnvironmentMismatches(cfg.expectedEnvironment, record.context));
+    if (mismatches.length) errors.push(`evidence runtime differs from expected environment: ${[...new Set(mismatches)].join('; ')}`);
+  }
+  return errors;
+}
+
+function integratedEvidenceGateErrors(cfg, task) {
+  if (cfg.profile === 'lite' || cfg.version < 2) return [];
+  const claimToken = cfg.workflow === 'branch-pr' ? remoteClaimHead(cfg, task.id) : null;
+  const records = taskEvidenceRecords(cfg, task).filter((record) => record.exitStatus === 0 && !record.signal && !record.error
+    && (!claimToken || record.context?.claimToken === claimToken));
+  const errors = [];
+  if (!records.length) errors.push(`${task.id}: integrated task lacks successful evidence for its active claim`);
+  for (const name of cfg.requiredChecks) if (!records.some((record) => record.check === name)) errors.push(`${task.id}: integrated task lacks required check "${name}"`);
+  if (cfg.profile === 'strict' && cfg.expectedEnvironment) {
+    const mismatches = records.flatMap((record) => expectedEnvironmentMismatches(cfg.expectedEnvironment, record.context));
+    if (mismatches.length) errors.push(`${task.id}: integrated evidence environment mismatch: ${[...new Set(mismatches)].join('; ')}`);
+  }
+  return errors;
+}
+
+function evidenceWarnings(cfg, task) {
+  const records = taskEvidenceRecords(cfg, task);
+  if (!records.length) return ['Evidence record lacks structured execution context'];
+  if (!cfg.expectedEnvironment || cfg.profile === 'strict') return [];
+  const mismatches = records.flatMap((record) => expectedEnvironmentMismatches(cfg.expectedEnvironment, record.context));
+  return mismatches.length ? [`Evidence runtime differs from expected environment: ${[...new Set(mismatches)].join('; ')}`] : [];
 }
 
 function cmdInit(args) {
   const profile = argValue(args, '--profile') ?? 'standard';
+  const idStrategy = argValue(args, '--id-strategy') ?? 'random';
   if (!PROFILES.includes(profile)) fail(`unknown profile "${profile}" (${PROFILES.join('|')})`);
+  if (!ID_STRATEGIES.includes(idStrategy)) fail(`unknown id strategy "${idStrategy}" (${ID_STRATEGIES.join('|')})`);
   const root = process.cwd();
   if (existsSync(join(root, 'tri.config.json'))) {
     if (!args.includes('--force')) fail('already initialized (tri.config.json exists); use --force to overwrite config only');
   }
-  const cfg = { profile, taskDir: 'tri/tasks', version: 1 };
-  writeFileSync(join(root, 'tri.config.json'), JSON.stringify(cfg, null, 2) + '\n');
+  const cfg = { version: 2, profile, taskDir: 'tri/tasks', idStrategy, workflow: 'trunk' };
+  atomicWrite(join(root, 'tri.config.json'), JSON.stringify(cfg, null, 2) + '\n');
   for (const d of ['tri/tasks', 'tri/adr', 'tri/evidence']) mkdirSync(join(root, d), { recursive: true });
   const copies = [
     ['DECISIONS.md', 'tri/DECISIONS.md'],
@@ -695,18 +862,84 @@ function cmdInit(args) {
   const agents = join(root, 'AGENTS.md');
   if (!existsSync(agents)) writeFileSync(agents, section);
   else if (!readFileSync(agents, 'utf8').includes('## TRI Method')) appendFileSync(agents, '\n' + section);
-  out(`initialized tri workspace (profile: ${profile}) at ${root}`);
+  const ignore = join(root, '.gitignore');
+  const ignoreText = existsSync(ignore) ? readFileSync(ignore, 'utf8') : '';
+  if (!ignoreText.split(/\r?\n/).includes('.tri/')) appendFileSync(ignore, `${ignoreText && !ignoreText.endsWith('\n') ? '\n' : ''}.tri/\n`);
+  out(`initialized tri workspace (profile: ${profile}, ids: ${idStrategy}) at ${root}`);
+}
+
+function slug(value) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'record';
+}
+
+function cmdNewAdr(args) {
+  const cfg = loadConfig();
+  projectPreflight(cfg, { clean: true, start: true });
+  if (cfg.idStrategy === 'sequential') refreshRemote(cfg);
+  const title = argValue(args, '--title') ?? fail('--title required');
+  const id = nextId(cfg, 'ADR-');
+  const dir = join(cfg.root, cfg.adrDir);
+  mkdirSync(dir, { recursive: true });
+  const projectTemplate = join(cfg.root, cfg.adrDir, 'ADR-template.md');
+  const body = readFileSync(existsSync(projectTemplate) ? projectTemplate : join(TEMPLATES, 'ADR-template.md'), 'utf8')
+    .replaceAll('ADR-NNNN', id).replace('Title', title)
+    .replace(/^- Status:.*$/m, '- Status: Proposed').replace('YYYY-MM-DD', new Date().toISOString().slice(0, 10));
+  if (!body.includes(`# ${id}:`) || !body.includes('- Status: Proposed')) fail('ADR template must contain an ADR-NNNN heading and Status field');
+  const file = join(dir, `${id}-${slug(title)}.md`);
+  atomicWrite(file, body);
+  out(`created ${id} at ${relative(cfg.root, file)}`);
+}
+
+function tableCell(value) { return String(value ?? '').replaceAll('|', '\\|').replace(/\s*\n\s*/g, ' ').trim(); }
+function appendTableRow(text, heading, row) {
+  const start = text.indexOf(`## ${heading}`);
+  if (start < 0) return null;
+  const next = text.indexOf('\n## ', start + 3);
+  const end = next < 0 ? text.length : next;
+  return `${text.slice(0, end).trimEnd()}\n${row}\n${text.slice(end).replace(/^\n*/, '\n')}`;
+}
+
+function cmdRegister(args) {
+  const cfg = loadConfig();
+  projectPreflight(cfg, { clean: true, start: true });
+  if (cfg.idStrategy === 'sequential') refreshRemote(cfg);
+  const kind = argValue(args, '--kind') ?? fail('--kind decision|blocker|assumption required');
+  const text = argValue(args, '--text') ?? fail('--text required');
+  const entries = cfg.decisionFiles.map((path) => join(cfg.root, path)).filter(existsSync);
+  let prefix; let heading; let row; let file;
+  if (kind === 'assumption') {
+    prefix = 'A-'; heading = 'Assumption Register';
+    file = entries.find((path) => readFileSync(path, 'utf8').includes('# Assumption Register')) ?? fail('assumption register not found');
+    const id = nextId(cfg, prefix);
+    row = `| ${id} | ${tableCell(text)} | ${tableCell(argValue(args, '--why') ?? 'N/A')} | ${tableCell(argValue(args, '--invalidated-by') ?? 'N/A')} |`;
+    const current = readFileSync(file, 'utf8').trimEnd();
+    atomicWrite(file, `${current}\n${row}\n`);
+    out(`recorded ${id} in ${relative(cfg.root, file)}`); return;
+  }
+  if (!['decision', 'blocker'].includes(kind)) fail('--kind must be decision|blocker|assumption');
+  file = entries.find((path) => readFileSync(path, 'utf8').includes('# Decision Register')) ?? fail('decision register not found');
+  prefix = kind === 'decision' ? 'D-' : 'B-';
+  heading = kind === 'decision' ? 'Resolved Direction' : 'Blocking Decisions';
+  const id = nextId(cfg, prefix);
+  row = kind === 'decision'
+    ? `| ${id} | ${tableCell(text)} | ${tableCell(argValue(args, '--rationale') ?? 'N/A')} |`
+    : `| ${id} | ${tableCell(text)} | ${tableCell(argValue(args, '--owner') ?? 'N/A')} | ${tableCell(argValue(args, '--blocks') ?? 'N/A')} |`;
+  const updated = appendTableRow(readFileSync(file, 'utf8'), heading, row);
+  if (updated === null) fail(`${relative(cfg.root, file)} is missing ## ${heading}`);
+  atomicWrite(file, updated);
+  out(`recorded ${id} in ${relative(cfg.root, file)}`);
 }
 
 function cmdNewTask(args) {
   const cfg = loadConfig();
-  refreshRemote(cfg);
+  projectPreflight(cfg, { clean: true, start: true });
+  if (cfg.idStrategy === 'sequential') refreshRemote(cfg);
   const title = argValue(args, '--title') ?? fail('--title required');
   const phaseArg = argValue(args, '--phase');
   const phase = phaseArg ?? '01';
   const deps = argValues(args, '--dep');
   const tasks = loadTasks(cfg);
-  const id = nextNumericId(cfg, cfg.idPrefix, tasks);
+  const id = nextId(cfg, cfg.idPrefix, tasks);
   const dir = resolvePhaseDir(cfg, phase);
   mkdirSync(dir, { recursive: true });
   const depsBlock = deps.length ? deps.map((d) => `- ${d}`).join('\n') : 'N/A';
@@ -747,9 +980,11 @@ function cmdNewTask(args) {
   }
   if (!body.includes('## Specification status')) body = insertSection(body, 'Status', 'Specification status', 'Unrevised');
   const file = join(dir, `${id}.md`);
-  writeFileSync(file, body);
+  atomicWrite(file, body);
   out(`created ${id} (${title}) at ${file}`);
-  out(`  id reserved against remote branches and configured default branch; resolve any collision by renumbering incoming entry to next free identifier at resolution time`);
+  out(cfg.idStrategy === 'random'
+    ? '  decentralized id allocated; no global sequence or remote reservation required'
+    : '  sequential id reserved against remote branches and configured default branch');
   if (cfg.taskTemplate) out(`  template: ${cfg.taskTemplate} — fill every field the project requires before claiming`);
   if (companionEntries(cfg).length) {
     out('  companion files need configured maintenance or same-change updates:');
@@ -781,9 +1016,10 @@ function cmdValidate(args = []) {
   const claimed = listClaimManifests(cfg);
   for (const file of claimed) {
     const scope = validateClaimScope(cfg, readClaimManifest(file), tasks, file);
-    for (const path of scope.forbiddenPaths) if (scope.writePaths.some((p) => pathMatches(p, [path]))) fail(`claim scope ${file}: writePaths includes forbidden path ${path}`);
+    for (const path of scope.forbiddenPaths) if (scope.writePaths.some((p) => patternsOverlap(p, path))) fail(`claim scope ${file}: writePaths includes forbidden path ${path}`);
   }
-  const inventory = remoteIdentifierInventory(cfg);
+  const inventory = cfg.idStrategy === 'sequential' || args.includes('--remote')
+    ? remoteIdentifierInventory(cfg) : { available: false, collisions: [] };
   if (args.includes('--remote') && !inventory.available) errors.push(`remote validation unavailable: ${inventory.reason}`);
   if (inventory.available && inventory.collisions.length) {
     const message = `remote identifier collisions: ${inventory.collisions.map((c) => c.id).join(', ')}; keep both entries and renumber incoming entries to next free identifiers during resolution`;
@@ -791,10 +1027,13 @@ function cmdValidate(args = []) {
   }
   warnings.push(...boilerplateWarnings(tasks));
   for (const t of tasks) {
-    if (!SPECIFICATION_STATUSES.includes(t.specificationStatus)) warnings.push(`${t.id}: unknown Specification status "${t.specificationStatus}" (expected ${SPECIFICATION_STATUSES.join(', ')})`);
+    if (!SPECIFICATION_STATUSES.includes(t.specificationStatus)) errors.push(`${t.id}: unknown Specification status "${t.specificationStatus}" (expected ${SPECIFICATION_STATUSES.join(', ')})`);
     if (t.specificationStatus === 'Unrevised') warnings.push(`${t.id}: specification is Unrevised; run clarify before claiming`);
     const withdrawnDeps = t.deps.filter((d) => map.get(d)?.status === 'Withdrawn' || map.get(d)?.specificationStatus === 'Withdrawn');
     if (withdrawnDeps.length) warnings.push(`${t.id}: depends on Withdrawn task(s): ${withdrawnDeps.join(', ')}`);
+    if (t.sections['Expected files'] && /[*?[\]{}]/.test(t.sections['Expected files'])) errors.push(`${t.id}: Expected files does not support globs`);
+    if (t.sections['Expected files'] && t.sections['Expected files'] !== 'N/A' && !taskExpectedFiles(t).length) errors.push(`${t.id}: Expected files must contain exact repository-relative files or directories`);
+    if (cfg.profile !== 'lite' && t.specificationStatus === 'Specified' && !taskExpectedFiles(t).length) warnings.push(`${t.id}: no exact Expected files; parallel execution will serialize it`);
   }
   const state = new Map();
   const stack = [];
@@ -839,6 +1078,7 @@ function cmdNext(args = []) {
 
 function cmdClaim(args) {
   const cfg = loadConfig();
+  projectPreflight(cfg, { clean: true, start: true });
   const id = taskArgument(cfg, args, `usage: claim ${cfg.idPrefix}NNNN --by <name>`);
   const by = argValue(args, '--by') ?? fail('--by <name> required');
   const tasks = loadTasks(cfg);
@@ -852,16 +1092,18 @@ function cmdClaim(args) {
   if (t.status === 'In Progress' && t.assignee !== 'N/A' && t.assignee !== by && !args.includes('--force')) {
     fail(`${id} is already claimed by ${t.assignee}; use --force to take it over`);
   }
+  const remoteClaim = requireRemoteClaim(cfg, id, by);
   const scope = claimScopeFor(cfg, id, by, args, tasks);
+  if (remoteClaim) { scope.claimToken = remoteClaim.token; scope.claimBase = remoteClaim.base; }
   const scopePath = claimManifestPath(cfg, id);
   mkdirSync(dirname(scopePath), { recursive: true });
-  writeFileSync(scopePath, JSON.stringify(scope, null, 2) + '\n');
+  atomicWrite(scopePath, JSON.stringify(scope, null, 2) + '\n');
   const unmet = t.deps.filter((d) => map.get(d)?.status !== 'Done');
   if (unmet.length) out(`warning: ${id} has dependencies not Done: ${unmet.join(', ')} — claim is advisory, proceeding`);
   setSection(t, 'Status', 'In Progress');
   let t2 = parseTask(t.file, cfg);
   if (!('Assignee' in t2.sections)) {
-    writeFileSync(t2.file, t2.text.replace(/(## Status\n\nIn Progress\n)/, `$1\n## Assignee\n\nN/A\n`));
+    atomicWrite(t2.file, t2.text.replace(/(## Status\n\nIn Progress\n)/, `$1\n## Assignee\n\nN/A\n`));
     t2 = parseTask(t2.file, cfg);
   }
   setSection(t2, 'Assignee', by);
@@ -870,12 +1112,14 @@ function cmdClaim(args) {
 
 function cmdRelease(args) {
   const cfg = loadConfig();
-  const id = taskArgument(cfg, args, `usage: release ${cfg.idPrefix}NNNN [--by <name>]`);
+  projectPreflight(cfg);
+  const id = taskArgument(cfg, args, `usage: release ${cfg.idPrefix}<ID> --by <name> [--force]`);
   const t = byId(loadTasks(cfg)).get(id) ?? fail(`${id} not found`);
   if (t.status !== 'In Progress') fail(`${id} is not In Progress`);
+  requireReleasedRemoteClaim(cfg, id);
   // Releasing is as consequential as claiming: it drops someone else's work in progress.
-  const by = argValue(args, '--by');
-  if (by && t.assignee !== 'N/A' && t.assignee !== by && !args.includes('--force')) {
+  const by = argValue(args, '--by') ?? fail('--by <name> required to release a claim');
+  if (t.assignee !== 'N/A' && t.assignee !== by && !args.includes('--force')) {
     fail(`${id} is claimed by ${t.assignee}, not ${by}; use --force to release it anyway`);
   }
   setSection(t, 'Status', 'Planned');
@@ -887,31 +1131,28 @@ function cmdRelease(args) {
 
 function cmdDone(args) {
   const cfg = loadConfig();
+  projectPreflight(cfg);
   const id = taskArgument(cfg, args, `usage: done ${cfg.idPrefix}NNNN`);
   const map = byId(loadTasks(cfg));
   const t = map.get(id) ?? fail(`${id} not found`);
   if (t.status !== 'In Progress') fail(`${id} is not In Progress (status: ${t.status}) — claim it first`);
+  requireCompletionClaim(cfg, t);
   const unmet = t.deps.filter((d) => !depSatisfied(map.get(d)));
   if (unmet.length) fail(`${id}: dependencies not Done: ${unmet.join(', ')}`);
   const withdrawnDeps = t.deps.filter((d) => map.get(d)?.status === 'Withdrawn' || map.get(d)?.specificationStatus === 'Withdrawn');
   if (withdrawnDeps.length) out(`warning: ${id}: dependencies Withdrawn: ${withdrawnDeps.join(', ')}`);
   if (cfg.profile !== 'lite') {
     const ev = t.sections['Evidence'] ?? '';
-    if (!ev || ev === 'N/A') fail(`${id}: Evidence section is empty — record commands and observed results before done`);
-  }
-  if (cfg.profile === 'strict') {
-    const evDir = join(cfg.root, cfg.evidenceDir);
-    const has = existsSync(evDir) && readdirSync(evDir).some((f) => f.startsWith(id));
-    if (!has) fail(`${id}: strict profile requires an evidence record at ${cfg.evidenceDir}/${id}-<date>.md`);
-  }
-  if (cfg.profile !== 'lite') {
+    if (!ev || ev === 'N/A') fail(`${id}: Evidence section is empty — summarize commands and observed results before done`);
+    const evidenceErrors = evidenceGateErrors(cfg, t);
+    if (evidenceErrors.length) fail(`${id}: ${evidenceErrors.join('; ')}`);
     for (const warning of evidenceWarnings(cfg, t)) out(`warning: ${id}: ${warning}`);
   }
   cmdValidate([]);
+  runCompanionHook(cfg, 'done', { id, nextStatus: 'Done' });
   setSection(t, 'Status', 'Done');
   const scopePath = claimManifestPath(cfg, id);
   if (existsSync(scopePath)) rmSync(scopePath);
-  runCompanionHook(cfg, 'done', { id });
   out(`${id} marked Done`);
 }
 
@@ -952,13 +1193,13 @@ function cmdGraph() {
   const cfg = loadConfig();
   const tasks = loadTasks(cfg);
   const map = byId(tasks);
-  const remaining = tasks.filter((t) => t.status !== 'Done');
+  const remaining = tasks.filter((t) => !depSatisfied(t));
   const depth = new Map();
   const path = new Map();
   function d(id) {
     if (depth.has(id)) return depth.get(id);
     const t = map.get(id);
-    if (!t || t.status === 'Done') return 0;
+    if (!t || depSatisfied(t)) return 0;
     depth.set(id, 0); // cycle guard; validate reports cycles properly
     let best = 0; let via = null;
     for (const dep of t.deps) { const v = d(dep); if (v > best) { best = v; via = dep; } }
@@ -973,7 +1214,7 @@ function cmdGraph() {
   out(`remaining: ${remaining.length} tasks`);
   out(`critical path: ${depth.get(deepest)} tasks (${chain.join(' -> ')})`);
   // ideal parallel waves
-  const done = new Set(tasks.filter((t) => t.status === 'Done').map((t) => t.id));
+  const done = new Set(tasks.filter(depSatisfied).map((t) => t.id));
   let todo = remaining.map((t) => t.id);
   const waves = [];
   while (todo.length) {
@@ -995,7 +1236,7 @@ function cmdVisualize(args) {
   function d(id) {
     if (depth.has(id)) return depth.get(id);
     const t = map.get(id);
-    if (!t || t.status === 'Done') return 0;
+    if (!t || depSatisfied(t)) return 0;
     depth.set(id, 0);
     let best = 0; let b = null;
     for (const dep of t.deps) { const v = d(dep); if (v > best) { best = v; b = dep; } }
@@ -1003,14 +1244,17 @@ function cmdVisualize(args) {
     return best + 1;
   }
   let deepest = null;
-  for (const t of tasks) if (t.status !== 'Done' && d(t.id) > (deepest ? depth.get(deepest) : 0)) deepest = t.id;
+  for (const t of tasks) if (!depSatisfied(t) && d(t.id) > (deepest ? depth.get(deepest) : 0)) deepest = t.id;
   const critical = [];
   for (let id = deepest; id; id = via.get(id)) critical.unshift(id);
   const ready = new Set(readyTasks(tasks, map).map((t) => t.id));
+  let run = null;
+  try { run = existsSync(runStatePath(cfg)) ? JSON.parse(readFileSync(runStatePath(cfg), 'utf8')) : null; } catch { /* board remains usable if scratch state is corrupt */ }
+  const workerByTask = new Map(Object.entries(run?.active ?? {}).map(([worker, assignment]) => [assignment.task, worker]));
   const phaseOf = (t) => basename(dirname(t.file)).replace(/^phase-/, '');
   const data = tasks.map((t) => ({
     id: t.id, title: t.title, status: t.status, assignee: t.assignee,
-    priority: t.priority, deps: t.deps, phase: phaseOf(t),
+    priority: t.priority, deps: t.deps, phase: phaseOf(t), worker: workerByTask.get(t.id) ?? null,
     ready: ready.has(t.id), critical: critical.includes(t.id),
   }));
   const html = boardHtml(data, critical, cfg);
@@ -1035,7 +1279,9 @@ function boardHtml(data, critical, cfg) {
 header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;gap:18px;align-items:baseline;flex-wrap:wrap}
 h1{font-size:16px;margin:0}.stat{color:var(--mut)}.stat b{color:var(--ink)}
 #f{margin-left:auto;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);min-width:220px}
+.view{padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);cursor:pointer}.view.on{border-color:var(--ready)}
 main{display:flex;gap:14px;overflow-x:auto;padding:16px 20px;align-items:flex-start}
+#graph{display:none;width:100%;min-height:650px;padding:16px 20px}#graph svg{width:100%;height:auto;min-height:620px}.edge{stroke:var(--line);stroke-width:2}.node{fill:var(--card);stroke:var(--line);stroke-width:2}.node.ready{stroke:var(--ready)}.node.critical{stroke:var(--crit);stroke-dasharray:5}.node-title{fill:var(--ink);font-size:12px}.node-id{fill:var(--mut);font-size:10px}
 .lane{min-width:230px;max-width:230px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px}
 .lane h2{font-size:12px;margin:0 0 8px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
 .chip{border:1px solid var(--line);border-left:4px solid var(--planned);border-radius:8px;padding:7px 9px;margin:6px 0;cursor:pointer;background:var(--bg)}
@@ -1055,30 +1301,30 @@ padding:18px;overflow:auto;transform:translateX(100%);transition:transform .18s}
 <header><h1>tri board</h1>
 ${cfg.statuses.map((s) => `<span class="stat">${s}: <b>${counts[s] ?? 0}</b></span>`).join('')}
 <span class="stat">critical path: <b>${critical.length}</b></span>
-<input id="f" placeholder="filter id / title / assignee…"></header>
+<input id="f" placeholder="filter id / title / assignee…"><button class="view on" id="boardBtn">Board</button><button class="view" id="graphBtn">Graph</button></header>
 <div class="legend">
 <span><span class="dot" style="background:var(--ready)"></span>ready</span>
 <span><span class="dot" style="background:var(--inprog)"></span>in progress</span>
 <span><span class="dot" style="background:var(--blocked)"></span>blocked</span>
 <span><span class="dot" style="background:var(--done)"></span>done</span>
 <span><span class="dot" style="border:2px dashed var(--crit);background:none"></span>critical path</span></div>
-<main id="board"></main>
+<main id="board"></main><section id="graph"></section>
 <aside id="panel"></aside>
 <script>
 const DATA=${JSON.stringify(data).replace(/</g, '\\u003c')};
 const byId=Object.fromEntries(DATA.map(t=>[t.id,t]));
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const board=document.getElementById('board'),panel=document.getElementById('panel'),f=document.getElementById('f');
+const board=document.getElementById('board'),graph=document.getElementById('graph'),panel=document.getElementById('panel'),f=document.getElementById('f'),boardBtn=document.getElementById('boardBtn'),graphBtn=document.getElementById('graphBtn');
 function render(q){q=(q||'').toLowerCase();board.innerHTML='';
 const phases=[...new Set(DATA.map(t=>t.phase))].sort();
-for(const p of phases){const items=DATA.filter(t=>t.phase===p&&(!q||(t.id+' '+t.title+' '+t.assignee).toLowerCase().includes(q)));
+for(const p of phases){const items=DATA.filter(t=>t.phase===p&&(!q||(t.id+' '+t.title+' '+t.assignee).toLowerCase().includes(q))).sort((a,b)=>a.priority.localeCompare(b.priority)||a.title.localeCompare(b.title));
 if(!items.length)continue;
 const lane=document.createElement('div');lane.className='lane';
 lane.innerHTML='<h2>phase '+p+' · '+items.filter(t=>t.status==='Done').length+'/'+items.length+'</h2>';
 for(const t of items){const c=document.createElement('div');
 c.className='chip s-'+t.status.replace(' ','')+(t.ready?' ready':'')+(t.critical?' crit':'');
 c.innerHTML='<div class="id">'+esc(t.id)+' <span class="t">'+esc(t.priority)+'</span></div><div class="t">'+esc(t.title)+'</div>'+
-(t.assignee&&t.assignee!=='N/A'?'<div class="who">'+esc(t.assignee)+'</div>':'');
+(t.worker?'<div class="who">worker: '+esc(t.worker)+'</div>':t.assignee&&t.assignee!=='N/A'?'<div class="who">'+esc(t.assignee)+'</div>':'');
 c.onclick=()=>show(t.id);lane.appendChild(c)}
 board.appendChild(lane)}}
 function show(id){const t=byId[id];if(!t)return;
@@ -1086,83 +1332,178 @@ const dependants=DATA.filter(x=>x.deps.includes(id)).map(x=>x.id);
 panel.className='open';panel.innerHTML='<button onclick="panel.className=\\'\\'">×</button>'+
 '<h3>'+esc(t.id)+'</h3><div>'+esc(t.title)+'</div>'+
 '<p class="mut">status: '+esc(t.status)+(t.ready?' (ready)':'')+' · '+esc(t.priority)+' · phase '+esc(t.phase)+
-(t.assignee!=='N/A'?' · '+esc(t.assignee):'')+(t.critical?' · on critical path':'')+'</p>'+
+(t.worker?' · worker '+esc(t.worker):t.assignee!=='N/A'?' · '+esc(t.assignee):'')+(t.critical?' · on critical path':'')+'</p>'+
 '<p><b>depends on</b><br>'+(t.deps.length?t.deps.map(d=>'<a onclick="show(\\''+esc(d)+'\\')">'+esc(d)+'</a> <span class="mut">'+esc(byId[d]?byId[d].status:'?')+'</span>').join('<br>'):'—')+'</p>'+
 '<p><b>unblocks</b><br>'+(dependants.length?dependants.map(d=>'<a onclick="show(\\''+esc(d)+'\\')">'+esc(d)+'</a>').join('<br>'):'—')+'</p>'}
+function renderGraph(){const level={},visiting=new Set();function depth(t){if(level[t.id]!=null)return level[t.id];if(visiting.has(t.id))return 0;visiting.add(t.id);level[t.id]=t.deps.length?1+Math.max(...t.deps.map(d=>byId[d]?depth(byId[d]):0)):0;visiting.delete(t.id);return level[t.id]}
+DATA.forEach(depth);const rows={};DATA.forEach(t=>(rows[level[t.id]]??=[]).push(t));const pos={};Object.entries(rows).forEach(([l,items])=>items.sort((a,b)=>a.phase.localeCompare(b.phase)||a.priority.localeCompare(b.priority)||a.title.localeCompare(b.title)).forEach((t,i)=>pos[t.id]={x:40+Number(l)*250,y:40+i*90}));
+const width=Math.max(700,100+250*(1+Math.max(0,...Object.values(level)))),height=Math.max(620,100+90*Math.max(1,...Object.values(rows).map(x=>x.length)));let body='';for(const t of DATA)for(const d of t.deps)if(pos[d])body+='<line class="edge" x1="'+(pos[d].x+180)+'" y1="'+(pos[d].y+28)+'" x2="'+pos[t.id].x+'" y2="'+(pos[t.id].y+28)+'"/>';
+for(const t of DATA){const p=pos[t.id];body+='<g data-id="'+esc(t.id)+'" style="cursor:pointer"><rect class="node'+(t.ready?' ready':'')+(t.critical?' critical':'')+'" x="'+p.x+'" y="'+p.y+'" width="180" height="56" rx="8"/><text class="node-id" x="'+(p.x+10)+'" y="'+(p.y+18)+'">'+esc(t.id)+'</text><text class="node-title" x="'+(p.x+10)+'" y="'+(p.y+39)+'">'+esc(t.title.slice(0,24))+'</text></g>'}graph.innerHTML='<svg viewBox="0 0 '+width+' '+height+'" role="img" aria-label="Task dependency graph">'+body+'</svg>';graph.querySelectorAll('[data-id]').forEach(node=>node.onclick=()=>show(node.dataset.id))}
+boardBtn.onclick=()=>{board.style.display='flex';graph.style.display='none';boardBtn.classList.add('on');graphBtn.classList.remove('on')};graphBtn.onclick=()=>{board.style.display='none';graph.style.display='block';graphBtn.classList.add('on');boardBtn.classList.remove('on');renderGraph()};
 f.oninput=()=>render(f.value);render('');
 </script></body></html>`;
 }
 
 function runStatePath(cfg) { return join(cfg.root, '.tri', 'run.json'); }
+function withRunLock(cfg, fn) {
+  const lock = join(cfg.root, '.tri', 'run.lock');
+  mkdirSync(dirname(lock), { recursive: true });
+  try { mkdirSync(lock); } catch { fail('run scheduler is busy; retry the lease request'); }
+  try { return fn(); } finally { rmSync(lock, { recursive: true, force: true }); }
+}
 
 function taskExpectedFiles(t) {
-  const files = new Set();
-  for (const line of (t.sections['Expected files'] ?? '').split('\n')) {
-    const match = line.match(/(?:^|[\s`*[(-])([\w.-]+(?:\/[\w.-]+)+\.\w{1,5})/);
-    if (match) files.add(match[1].replace(/^\.\//, ''));
+  const paths = new Set();
+  for (const raw of (t?.sections['Expected files'] ?? '').split('\n')) {
+    const value = raw.replace(/^\s*[-*]\s*/, '').replaceAll('`', '').trim().replace(/^\.\//, '');
+    if (!value || value === 'N/A' || /\s|[*?[\]{}]/.test(value) || !/^[A-Za-z0-9._/-]+$/.test(value) || value.split(/[\\/]+/).includes('..')) continue;
+    paths.add(value);
   }
-  return files;
+  return [...paths];
+}
+
+function taskScopesConflict(left, right) {
+  const a = taskExpectedFiles(left); const b = taskExpectedFiles(right);
+  if (!a.length || !b.length) return true;
+  return a.some((x) => b.some((y) => patternsOverlap(x, y)));
 }
 
 function runOverlapWarnings(queue, map) {
   const warnings = [];
-  for (let i = 0; i < queue.length; i++) {
-    for (let j = i + 1; j < queue.length; j++) {
-      const a = queue[i], b = queue[j];
-      for (const file of taskExpectedFiles(map.get(a))) {
-        if (taskExpectedFiles(map.get(b)).has(file)) warnings.push(`${a} and ${b} both touch ${file}`);
-      }
-    }
+  for (let i = 0; i < queue.length; i++) for (let j = i + 1; j < queue.length; j++) {
+    const a = map.get(queue[i]); const b = map.get(queue[j]);
+    const left = taskExpectedFiles(a); const right = taskExpectedFiles(b);
+    const overlap = left.find((x) => right.some((y) => patternsOverlap(x, y)));
+    if (overlap) warnings.push(`${a.id} and ${b.id} both touch ${overlap}`);
+    else if (!left.length || !right.length) warnings.push(`${a.id} and ${b.id} have undeclared Expected files`);
   }
   return warnings;
 }
 
+function runTaskReady(id, state, tasks) {
+  const task = tasks.get(id);
+  return task && ['Planned', 'Ready'].includes(task.status) && !state.done.includes(id) && !state.blocked.includes(id)
+    && !Object.values(state.active ?? {}).some((entry) => entry.task === id)
+    && task.deps.every((dep) => state.queue.includes(dep) ? state.done.includes(dep) || depSatisfied(tasks.get(dep)) : depSatisfied(tasks.get(dep)));
+}
+
+function leasableTasks(state, tasks) {
+  const active = Object.values(state.active ?? {}).map((entry) => tasks.get(entry.task));
+  return state.queue.filter((id) => runTaskReady(id, state, tasks))
+    .filter((id) => active.every((task) => !taskScopesConflict(tasks.get(id), task)));
+}
+
+function declaredParallelism(queue, tasks) {
+  const remaining = new Set(queue);
+  const complete = new Set([...tasks.values()].filter(depSatisfied).map((task) => task.id));
+  let maximum = 1;
+  while (remaining.size) {
+    const ready = [...remaining].filter((id) => tasks.get(id).deps.every((dep) => complete.has(dep) || !tasks.has(dep)));
+    if (!ready.length) break;
+    const selected = [];
+    for (const id of ready) if (selected.every((other) => !taskScopesConflict(tasks.get(id), tasks.get(other)))) selected.push(id);
+    maximum = Math.max(maximum, selected.length);
+    for (const id of ready) { remaining.delete(id); complete.add(id); }
+  }
+  return maximum;
+}
+
 function cmdRunState(args) {
   const cfg = loadConfig();
+  if (args.length && !args.includes('--json') && argValue(args, '--start') === undefined) projectPreflight(cfg);
   const p = runStatePath(cfg);
-  const load = () => (existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : null);
-  const save = (s) => { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, JSON.stringify(s, null, 2) + '\n'); };
+  const load = () => {
+    if (!existsSync(p)) return null;
+    try {
+      const state = JSON.parse(readFileSync(p, 'utf8'));
+      state.requestedMode ??= state.mode ?? 'sequential'; state.actualMode ??= state.mode ?? 'sequential';
+      state.capacity ??= state.actualMode === 'sequential' ? 1 : 4; state.active ??= {}; state.workers ??= {};
+      return state;
+    } catch (error) { fail(`run state is not valid JSON: ${error.message}`); }
+  };
+  const save = (state) => atomicWrite(p, JSON.stringify(state, null, 2) + '\n');
 
   const scope = argValue(args, '--start');
   if (scope !== undefined) {
+    projectPreflight(cfg, { clean: true, start: true });
     const existing = load();
     if (existing && !existing.finishedAt) fail(`active run already exists: ${existing.scope}; finish or resume it before starting another`);
     const queue = (argValue(args, '--queue') ?? '').split(',').map((x) => x.trim()).filter(Boolean);
     if (!queue.length) fail('--queue <ID,ID,...> required with --start');
     if (new Set(queue).size !== queue.length) fail('run queue contains duplicate task IDs');
+    const requestedMode = argValue(args, '--mode') ?? 'auto';
+    if (!RUN_MODES.includes(requestedMode)) fail(`unknown run mode "${requestedMode}" (${RUN_MODES.join('|')})`);
     const tasks = byId(loadTasks(cfg));
-    const knownQueue = queue.filter((id) => !tasks.has(id));
-    if (knownQueue.length) fail(`run queue contains unknown task(s): ${knownQueue.join(', ')}`);
+    const unknown = queue.filter((id) => !tasks.has(id));
+    if (unknown.length) fail(`run queue contains unknown task(s): ${unknown.join(', ')}`);
+    const unavailable = queue.filter((id) => !['Planned', 'Ready'].includes(tasks.get(id).status) || depSatisfied(tasks.get(id)));
+    if (unavailable.length) fail(`run queue contains unavailable task(s): ${unavailable.join(', ')}`);
     const unrevised = queue.filter((id) => tasks.get(id)?.specificationStatus === 'Unrevised');
-    if (unrevised.length && !args.includes('--allow-unrevised')) {
-      fail(`run includes Unrevised tasks: ${unrevised.join(', ')} — clarify before implementation or pass --allow-unrevised deliberately`);
-    }
-    const mode = argValue(args, '--mode') ?? 'sequential';
-    if (!RUN_MODES.includes(mode)) fail(`unknown run mode "${mode}" (${RUN_MODES.join('|')})`);
-    if (mode !== 'sequential') {
-      for (const warning of runOverlapWarnings(queue, tasks)) {
-        out(`warning: ${mode} run queues tasks that declare overlapping Expected files: ${warning} — prefer sequential, or extract the shared file to its own task`);
-      }
-    }
+    if (unrevised.length && !args.includes('--allow-unrevised')) fail(`run includes Unrevised tasks: ${unrevised.join(', ')} — clarify first or pass --allow-unrevised deliberately`);
+    const capacity = Number(argValue(args, '--capacity') ?? 4);
+    if (!Number.isInteger(capacity) || capacity < 1 || capacity > 16) fail('run capacity must be an integer from 1 to 16');
+    const parallelism = Math.min(capacity, declaredParallelism(queue, tasks));
+    const teamCapable = args.includes('--team-capable');
+    const phases = new Set(queue.map((id) => basename(dirname(tasks.get(id).file))));
+    const teamRelated = phases.size === 1;
+    let actualMode = requestedMode;
+    if (requestedMode === 'auto') actualMode = teamCapable && teamRelated && parallelism >= 4 ? 'team' : parallelism >= 2 ? 'parallel' : 'sequential';
+    if (requestedMode === 'team' && !teamCapable) actualMode = parallelism >= 2 ? 'parallel' : 'sequential';
+    if (requestedMode === 'parallel' && parallelism < 2) actualMode = 'sequential';
+    if (actualMode !== 'sequential') for (const warning of runOverlapWarnings(queue, tasks)) out(`warning: ${warning}; those tasks will serialize`);
     const state = {
-      scope, mode,
-      queue, done: [], blocked: [], startedAt: new Date().toISOString(), finishedAt: null,
+      version: 2, scope, mode: actualMode, requestedMode, actualMode, capacity: actualMode === 'sequential' ? 1 : capacity,
+      queue, done: [], blocked: [], active: {}, workers: {}, startedAt: new Date().toISOString(), finishedAt: null,
     };
     save(state);
-    out(`run started: ${scope} (${state.mode}), ${queue.length} queued — ${queue.join(', ')}`);
+    out(`run started: ${scope} (requested ${requestedMode}, actual ${actualMode}, capacity ${state.capacity}), ${queue.length} queued — ${queue.join(', ')}`);
     return;
   }
 
   const state = load();
+  const workerArg = argValue(args, '--lease');
+  if (workerArg !== undefined) {
+    if (!state || state.finishedAt) fail('no active run');
+    const names = workerArg.split(',').map((name) => name.trim()).filter(Boolean);
+    if (!names.length || new Set(names).size !== names.length) fail('--lease requires unique comma-separated worker names');
+    const assignments = withRunLock(cfg, () => {
+      const current = load();
+      const tasks = byId(loadTasks(cfg));
+      const result = [];
+      for (const worker of names) {
+        if (current.active[worker]) { result.push(current.active[worker]); continue; }
+        if (Object.keys(current.active).length >= current.capacity) { result.push({ task: null, reason: 'capacity' }); continue; }
+        const id = leasableTasks(current, tasks)[0];
+        if (!id) { result.push({ task: null, reason: 'no-declared-safe-ready-task' }); continue; }
+        const assignment = { task: id, paths: taskExpectedFiles(tasks.get(id)), startedAt: new Date().toISOString() };
+        current.active[worker] = assignment;
+        current.workers[worker] = { ...(current.workers[worker] ?? {}), lastTask: id, lastSeenAt: assignment.startedAt };
+        result.push(assignment);
+      }
+      save(current); return result;
+    });
+    out(JSON.stringify(names.length === 1 ? assignments[0] : assignments)); return;
+  }
+
   for (const [flag, key] of [['--done', 'done'], ['--blocked', 'blocked']]) {
     const id = argValue(args, flag);
     if (id === undefined) continue;
     if (!state) fail('no active run — start one with --start');
     if (state.finishedAt) fail('run is already finished');
     if (!state.queue.includes(id)) fail(`${id} is not in active run queue`);
+    if (key === 'done') {
+      if (!Object.values(state.active ?? {}).some((assignment) => assignment.task === id)) fail(`${id} has no active worker lease`);
+      const task = byId(loadTasks(cfg)).get(id);
+      if (task?.status !== 'Done') fail(`${id} cannot enter run-state done until its integrated task status is Done`);
+      const evidenceErrors = integratedEvidenceGateErrors(cfg, task);
+      if (evidenceErrors.length) fail(evidenceErrors.join('\n'));
+    }
     const other = key === 'done' ? 'blocked' : 'done';
     if (state[other].includes(id)) fail(`${id} is already recorded as ${other}`);
     if (!state[key].includes(id)) state[key].push(id);
+    for (const [name, assignment] of Object.entries(state.active ?? {})) if (assignment.task === id) {
+      delete state.active[name]; state.workers[name].lastSeenAt = new Date().toISOString();
+    }
     save(state);
     out(`${id} recorded as ${key}; ${state.queue.filter((q) => !state.done.includes(q) && !state.blocked.includes(q)).length} remaining`);
     return;
@@ -1171,50 +1512,125 @@ function cmdRunState(args) {
   if (args.includes('--finish')) {
     if (!state) fail('no active run to finish');
     if (state.finishedAt) fail('run is already finished');
-    state.finishedAt = new Date().toISOString();
-    save(state);
-    out(`run finished: ${state.done.length} done, ${state.blocked.length} blocked, ${state.queue.length - state.done.length - state.blocked.length} not reached`);
-    return;
+    if (Object.keys(state.active ?? {}).length) fail('cannot finish while workers still have active assignments');
+    state.finishedAt = new Date().toISOString(); save(state);
+    out(`run finished: ${state.done.length} done, ${state.blocked.length} blocked, ${state.queue.length - state.done.length - state.blocked.length} not reached`); return;
   }
 
   if (!state || state.finishedAt) { out('no active run'); return; }
-  const remaining = state.queue.filter((q) => !state.done.includes(q) && !state.blocked.includes(q));
-  out(`run: ${state.scope} (${state.mode}), started ${state.startedAt}`);
+  if (args.includes('--json')) { out(JSON.stringify(state, null, 2)); return; }
+  const remaining = state.queue.filter((id) => !state.done.includes(id) && !state.blocked.includes(id));
+  out(`run: ${state.scope} (${state.actualMode}, requested ${state.requestedMode}), started ${state.startedAt}`);
+  out(`  active: ${Object.entries(state.active ?? {}).map(([name, item]) => `${name}:${item.task}`).join(', ') || 'none'}`);
   out(`  done: ${state.done.join(', ') || 'none'}`);
   out(`  blocked: ${state.blocked.join(', ') || 'none'}`);
   out(`  remaining: ${remaining.join(', ') || 'none'}`);
+}
+
+function cmdVerifyScope(args) {
+  const cfg = loadConfig();
+  const id = taskArgument(cfg, args, `usage: verify-scope ${cfg.idPrefix}<ID> --base <commit>`);
+  const base = argValue(args, '--base') ?? fail('--base <commit> required');
+  const task = byId(loadTasks(cfg)).get(id) ?? fail(`${id} not found`);
+  const taskPath = relative(cfg.root, task.file);
+  const baseTask = git(['show', `${base}:${taskPath}`], cfg.root, true);
+  if (baseTask.status !== 0 || baseTask.error) fail(`${id}: task does not exist at scope base ${base}`);
+  const scopes = taskExpectedFiles({ sections: { 'Expected files': sectionBody(baseTask.stdout, 'Expected files') } });
+  if (!scopes.length) fail(`${id}: base task must declare exact Expected files before parallel execution`);
+  const diff = git(['diff', '--name-only', `${base}..HEAD`], cfg.root).stdout.split(/\r?\n/).filter(Boolean);
+  const allowedState = [taskPath, `${cfg.evidenceDir}/${id}-`];
+  const outside = diff.filter((path) => !scopes.some((scope) => scope.endsWith('/') ? path.startsWith(scope) : path === scope)
+    && path !== allowedState[0] && !path.startsWith(allowedState[1]));
+  if (outside.length) fail(`${id}: worker changed paths outside Expected files:\n${outside.join('\n')}`);
+  out(`${id}: scope verified (${diff.length} changed path(s))`);
+}
+
+function cmdClaimRef(args) {
+  const cfg = loadConfig();
+  const id = taskArgument(cfg, args, `usage: claim-ref ${cfg.idPrefix}<ID>`);
+  if (!byId(loadTasks(cfg)).has(id)) fail(`${id} not found`);
+  out(claimRef(id));
+}
+
+function cmdClaimToken(args) {
+  const cfg = loadConfig();
+  projectPreflight(cfg, { clean: true, start: true });
+  const id = taskArgument(cfg, args, `usage: claim-token ${cfg.idPrefix}<ID> --by <owner>`);
+  const owner = argValue(args, '--by') ?? fail('--by <owner> required');
+  if (!owner.trim() || /[\r\n]/.test(owner)) fail('--by owner must be one non-empty line');
+  if (!byId(loadTasks(cfg)).has(id)) fail(`${id} not found`);
+  const head = git(['rev-parse', 'HEAD'], cfg.root).stdout.trim();
+  const tree = git(['rev-parse', 'HEAD^{tree}'], cfg.root).stdout.trim();
+  const message = `TRI claim ${id}\nowner ${owner}\nnonce ${randomBytes(12).toString('hex')}\n`;
+  const token = spawnSync('git', ['commit-tree', tree, '-p', head], { cwd: cfg.root, encoding: 'utf8', input: message });
+  if (token.status !== 0 || token.error) fail(`cannot create claim token: ${(token.error?.message || token.stderr || 'git failed').trim()}`);
+  out(JSON.stringify({ id, ref: claimRef(id), token: token.stdout.trim(), base: head }));
 }
 
 function cmdSync() {
   const cfg = loadConfig();
   refreshRemote(cfg);
   const remote = cfg.remote ?? 'origin';
+  if (cfg.idStrategy === 'random') {
+    const claims = git(['ls-remote', '--heads', remote, 'refs/heads/tri/claims/*'], cfg.root, true);
+    if (claims.status !== 0 || claims.error) fail(`cannot read remote claim refs from ${remote}`);
+    const refs = claims.stdout.split(/\r?\n/).filter(Boolean).map((line) => line.split(/\s+/)[1]);
+    out(`synced ${remote}; ${refs.length} active claim(s)`);
+    for (const ref of refs) out(`  ${ref}`);
+    return;
+  }
   const inventory = requireRemoteInventory(cfg, 'sync');
   out(`synced ${remote}; scanned ${inventory.branches.length} remote branch(es), ${inventory.reserved.size} allocated identifier(s)`);
   if (inventory.collisions.length) out(`warning: collisions: ${inventory.collisions.map((c) => c.id).join(', ')}`);
 }
 
+function safeEvidenceCommand(command) {
+  const secretFlag = /^(?:--?(?:api[-_]?key|token|password|secret|authorization|cookie)|-u|--user|-b|--proxy-user)$/i;
+  return command.map((part, index) => {
+    const previous = command[index - 1] ?? '';
+    if (index && secretFlag.test(previous)) return '<redacted>';
+    if (index && /^(?:-H|--header)$/i.test(previous) && /^(?:authorization|cookie|set-cookie|(?:x-)?api[-_]?key|token|secret|password):/i.test(part)) {
+      return `${part.split(':', 1)[0]}: <redacted>`;
+    }
+    return part
+      .replace(/((?:api[-_]?key|token|password|secret|authorization|cookie|session)=)[^\s]+/ig, '$1<redacted>')
+      .replace(/(authorization:\s*(?:bearer|basic)\s+)\S+/ig, '$1<redacted>')
+      .replace(/:\/\/([^:/\s]+):([^@/\s]+)@/g, '://$1:<redacted>@');
+  });
+}
+
 function cmdEvidence(args) {
   const cfg = loadConfig();
-  const id = taskArgument(cfg, args, `usage: evidence ${cfg.idPrefix}NNNN -- command [args...]`);
+  projectPreflight(cfg);
+  const id = taskArgument(cfg, args, `usage: evidence ${cfg.idPrefix}<ID> [--name check] -- command [args...]`);
+  const task = byId(loadTasks(cfg)).get(id) ?? fail(`${id} not found`);
+  if (task.status !== 'In Progress') fail(`${id} is not In Progress`);
   const separator = args.indexOf('--');
-  if (separator < 0 || separator === args.length - 1) fail('usage: evidence ID -- command [args...]');
+  if (separator < 0 || separator === args.length - 1) fail('usage: evidence ID [--name check] -- command [args...]');
   const command = args.slice(separator + 1);
+  const check = argValue(args.slice(0, separator), '--name') ?? basename(command[0]);
   validateArgv(command, 'evidence command');
   const started = Date.now();
   let result;
-  try { result = spawnSync(command[0], command.slice(1), { cwd: cfg.root, encoding: 'utf8' }); }
+  try { result = spawnSync(command[0], command.slice(1), { cwd: cfg.root, encoding: 'utf8', maxBuffer: EVIDENCE_MAX_BYTES }); }
   catch (error) { fail(`evidence command failed to start: ${error.message}`); }
-  const observed = { exitStatus: result.status, signal: result.signal ?? null, error: result.error?.message ?? null, output: `${result.stdout || ''}${result.stderr || ''}`.trim(), durationMs: Date.now() - started };
+  if (result.error?.code === 'ENOBUFS') fail(`evidence output exceeded ${EVIDENCE_MAX_BYTES} bytes; rerun a quieter command`);
   if (result.error) fail(`evidence command failed to start: ${result.error.message}`);
-  const path = appendEvidenceContext(cfg, id, command, observed);
-  out(`evidence captured for ${id}: ${path}`);
-  if (observed.output) out(observed.output);
+  const output = `${result.stdout || ''}${result.stderr || ''}`;
+  const observed = {
+    check, exitStatus: result.status, signal: result.signal ?? null, error: null,
+    outputBytes: Buffer.byteLength(output), outputSha256: createHash('sha256').update(output).digest('hex'),
+    durationMs: Date.now() - started,
+  };
+  const path = appendEvidenceContext(cfg, id, safeEvidenceCommand(command), observed);
+  out(`evidence captured for ${id} (${check}): ${path}`);
+  if (output.trim()) out(output.trim());
   if (result.status !== 0) process.exitCode = result.status ?? 1;
 }
 
 function cmdCompanions(args) {
   const cfg = loadConfig();
+  if (args.includes('--check')) projectPreflight(cfg);
   const entries = companionEntries(cfg);
   if (!entries.length) { out('no companions configured'); return; }
   if (args.includes('--check')) {
@@ -1241,7 +1657,7 @@ function registerFiles(cfg) {
 }
 
 function parseAdrDocument(file, text) {
-  const fileMatch = basename(file).match(/^(ADR-\d+)(?:[-_].*)?\.md$/i);
+  const fileMatch = basename(file).match(new RegExp(`^(ADR-${ID_PART_SOURCE})(?:[-_].*)?\\.md$`, 'i'));
   if (!fileMatch || /ADR-template\.md$/i.test(file)) return { ok: false, reason: 'not a canonical ADR file' };
   const id = fileMatch[1].toUpperCase();
   const lines = text.replace(/\r\n?/g, '\n').split('\n');
@@ -1255,7 +1671,7 @@ function parseAdrDocument(file, text) {
     if (/^[ \t]*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
     if (!fenced) content.push(line);
   }
-  const headings = content.filter((line) => /^#[ \t]+ADR-\d+[ \t]*:[ \t]*\S/.test(line));
+  const headings = content.filter((line) => new RegExp(`^#[ \\t]+ADR-${ID_PART_SOURCE}[ \\t]*:[ \\t]*\\S`, 'i').test(line));
   const allH1 = content.filter((line) => /^#[ \t]+/.test(line));
   if (allH1.length !== 1 || headings.length !== 1 || !new RegExp(`^#[ \\t]+${id.replace('-', '\\-')}[ \\t]*:[ \\t]*\\S`, 'i').test(headings[0])) {
     return { ok: false, id, reason: `filename/header mismatch (expected exactly one # ${id}: heading)` };
@@ -1266,7 +1682,7 @@ function parseAdrDocument(file, text) {
   if (/^(?:Proposed|Accepted)$/i.test(statusText)) {
     return { ok: true, id, file, text, status: statusText, successor: null };
   }
-  const superseded = statusText.match(/^Superseded[ \t]+by[ \t]+(?:(ADR-\d+)|\[(ADR-\d+)\]\([^)]*\))$/i);
+  const superseded = statusText.match(new RegExp(`^Superseded[ \\t]+by[ \\t]+(?:(ADR-${ID_PART_SOURCE})|\\[(ADR-${ID_PART_SOURCE})\\]\\([^)]*\\))$`, 'i'));
   if (!superseded) return { ok: false, id, reason: `unsupported Status value "${statusText}"` };
   return { ok: true, id, file, text, status: 'Superseded', successor: (superseded[1] ?? superseded[2]).toUpperCase() };
 }
@@ -1278,7 +1694,7 @@ function adrDirectoryPrefix(cfg) {
 
 function isAdrPath(cfg, file) {
   const normalized = file.replace(/\\/g, '/').replace(/^\.\//, '');
-  return normalized.startsWith(adrDirectoryPrefix(cfg)) && /(?:^|\/)ADR-\d+(?:[-_].*)?\.md$/i.test(normalized);
+  return normalized.startsWith(adrDirectoryPrefix(cfg)) && new RegExp(`(?:^|/)ADR-${ID_PART_SOURCE}(?:[-_].*)?\\.md$`, 'i').test(normalized);
 }
 
 function adrMap(cfg, base, files, warnings = []) {
@@ -1289,7 +1705,7 @@ function adrMap(cfg, base, files, warnings = []) {
     if (!content.ok) { warnings.push(`cannot inspect ADR ${file} on ${base}: ${content.reason}`); continue; }
     const parsed = parseAdrDocument(file, content.text);
     if (!parsed.ok) {
-      const id = parsed.id ?? basename(file).match(/^(ADR-\d+)/i)?.[1]?.toUpperCase();
+      const id = parsed.id ?? basename(file).match(new RegExp(`^(ADR-${ID_PART_SOURCE})`, 'i'))?.[1]?.toUpperCase();
       if (id) malformed.set(id, { file, reason: parsed.reason });
       warnings.push(`${file}: malformed ADR: ${parsed.reason}`);
       continue;
@@ -1375,7 +1791,7 @@ function cmdDoctor() {
     const text = readFileSync(file, 'utf8');
     registerTexts.push({ file: relative(cfg.root, file), text });
     for (const [id] of definitionIdentifiers(cfg, relative(cfg.root, file), text)) {
-      if (/^[DBA]-\d+$/.test(id)) definedRegisters.add(id);
+      if (new RegExp(`^[DBA]-${ID_PART_SOURCE}$`, 'i').test(id)) definedRegisters.add(id.toUpperCase());
     }
   }
   for (const { file, text } of registerTexts) {
@@ -1384,7 +1800,7 @@ function cmdDoctor() {
       if (!definedRegisters.has(id)) warnings.push(`${file}: references undefined register identifier ${id}`);
     }
     for (const line of text.split(/\r?\n/)) {
-      if (/\b(?:contradict|conflict|supersed|override|overrule)\w*\b/i.test(line) && /\bADR-\d+\b/i.test(line)) {
+      if (/\b(?:contradict|conflict|supersed|override|overrule)\w*\b/i.test(line) && new RegExp(`\\bADR-${ID_PART_SOURCE}\\b`, 'i').test(line)) {
         warnings.push(`${file}: explicit decision/ADR conflict language requires review: ${line.trim()}`);
       }
     }
@@ -1433,6 +1849,7 @@ function rebaselineLayers(cfg) {
 }
 function cmdRebaseline(args) {
   const cfg = loadConfig();
+  projectPreflight(cfg);
   const path = rebaselinePath(cfg);
   let state;
   try {
@@ -1451,7 +1868,7 @@ function cmdRebaseline(args) {
     if (!commit) fail('rebaseline approval requires a git repository and commit');
     state.approvals.push({ layer: layer.id, approvedAt: new Date().toISOString(), commit, branch: gitBranch(cfg) });
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(state, null, 2) + '\n');
+    atomicWrite(path, JSON.stringify(state, null, 2) + '\n');
     out(`approval recorded for ${layer.label}; edit this layer, commit on default branch, then run rebaseline --complete`); return;
   }
   if (args.includes('--complete')) {
@@ -1470,13 +1887,15 @@ function cmdRebaseline(args) {
     if (!layerPathMatches(layer, changed)) fail(`${layer.label} completion changed no configured layer paths (${layer.paths.join(', ')})`);
     state.completed.push({ layer: layer.id, commit, changed });
     state.layer += 1;
-    writeFileSync(path, JSON.stringify(state, null, 2) + '\n');
+    atomicWrite(path, JSON.stringify(state, null, 2) + '\n');
     out(`re-baseline layer complete: ${layer.label}; next layer: ${layers[state.layer]?.label ?? 'none'}`); return;
   }
   out(`re-baseline layer ${state.layer + 1}/${layers.length}: ${layer.label}`);
   out(`paths: ${layer.paths.join(', ')}`);
   out('approve layer before editing; complete only after a clean commit reaches the configured default branch');
 }
+
+function cmdMeta() { out(JSON.stringify(META, null, 2)); }
 
 function argValue(args, flag) {
   const i = args.indexOf(flag);
@@ -1494,16 +1913,23 @@ const commands = {
   init: cmdInit, 'new-task': cmdNewTask, validate: cmdValidate, next: cmdNext,
   claim: cmdClaim, release: cmdRelease, done: cmdDone, status: cmdStatus, graph: cmdGraph,
   visualize: cmdVisualize, 'run-state': cmdRunState, sync: cmdSync, evidence: cmdEvidence, companions: cmdCompanions,
-  doctor: cmdDoctor, rebaseline: cmdRebaseline,
+  doctor: cmdDoctor, rebaseline: cmdRebaseline, 'new-adr': cmdNewAdr, register: cmdRegister,
+  'verify-scope': cmdVerifyScope, 'claim-ref': cmdClaimRef, 'claim-token': cmdClaimToken, meta: cmdMeta,
 };
+const metadataDrift = [...new Set([...Object.keys(commands), ...Object.keys(COMMAND_META)])]
+  .filter((name) => !(name in commands) || !(name in COMMAND_META));
+if (metadataDrift.length) fail(`internal command metadata drift: ${metadataDrift.join(', ')}`);
 if (!cmd || !(cmd in commands)) {
   fail(`usage: tri.mjs <${Object.keys(commands).join('|')}> [args]
-  init [--profile lite|standard|strict] [--force]
+  init [--profile lite|standard|strict] [--id-strategy random|sequential] [--force]
   new-task --title "..." [--phase NN] [--dep T-NNNN]...
   claim T-NNNN --by <name> [--force]     (dynamic pull-based claiming; advisory, warns but never blocks on deps)
   release T-NNNN | done T-NNNN | next | status | graph | validate
   visualize [--out path]                 (self-contained HTML board, default .tri/graph.html)
   run-state [--start <scope> --queue <ID,..> [--mode m]] [--done ID] [--blocked ID] [--finish]
-  sync | evidence ID -- command [args...] | companions [--check] | doctor | rebaseline [--approve|--complete]`);
+  new-adr --title "..." | register --kind decision|blocker|assumption --text "..."
+  sync | evidence ID [--name check] -- command [args...] | companions [--check] | doctor
+  claim-token ID --by owner | claim-ref ID | verify-scope ID --base commit
+  rebaseline [--approve|--complete] | meta`);
 }
 commands[cmd](args);
