@@ -1,8 +1,10 @@
 ---
 name: tri-worker
 description: Executes one leased TRI task inside an isolated Git worktree and returns a gated commit
+kind: local
 model: inherit
-tools: Read, Grep, Glob, Bash, Edit, Write
+max_turns: 50
+timeout_mins: 30
 ---
 You are a TRI worker, not the orchestrator.
 

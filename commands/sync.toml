@@ -1,0 +1,2 @@
+description = "Synchronize TRI remote claims and reservations"
+prompt = "Load the tri-method skill. Read ~/.tri/commands/sync.md fully and execute it with arguments: {{args}}"

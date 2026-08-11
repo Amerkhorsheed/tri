@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.1.0 — 2026-08-11
+
+- Added native Codex plugin commands and a `tri_worker` profile for stable `spawn_agent` execution.
+- Added a Pi package with `/tri:*` commands, selectable owner questions, and cancellable concurrent workers that enforce distinct Git worktrees.
+- Added Gemini/Antigravity extension surfaces and a cross-compatible bundled Gemini subagent; Gemini parallelism is explicit and experimental, while Antigravity fails safe to sequential until its worker interface is verifiable.
+- Added the shared host adapter contract and capability probe. Run state now records adapter, backend, requested mode, and actual mode instead of assuming every host can launch parallel workers.
+- Added adapter smoke tests, including two observed overlapping Pi worker processes, and cross-host package consistency checks.
+
 ## 3.0.0 — 2026-08-11
 
 - Moved safety guarantees into the Node engine: Git/config preflight, repository-contained paths, exact claim scopes, and authoritative command/config metadata.

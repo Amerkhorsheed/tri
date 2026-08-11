@@ -5,7 +5,7 @@ argument-hint: "<the architectural decision to record>"
 Load the tri-method skill and run tier 1 preflight. Create the file through the engine:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/tri.mjs new-adr --title "<title>"
+node ~/.tri/scripts/tri.mjs new-adr --title "<title>"
 ```
 
 Fill Context, Decision, Alternatives, Consequences, and Reconsideration. Keep Status `Proposed` unless the owner already accepted it. Record the accompanying direction through `tri.mjs register --kind decision`; never allocate an ADR or D- identifier manually.

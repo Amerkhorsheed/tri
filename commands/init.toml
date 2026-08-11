@@ -1,0 +1,2 @@
+description = "Initialize a TRI workspace"
+prompt = "Load the tri-method skill. Read ~/.tri/commands/init.md fully and execute it with arguments: {{args}}"

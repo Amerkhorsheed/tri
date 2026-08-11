@@ -1,0 +1,2 @@
+description = "Decompose a specification into TRI tasks"
+prompt = "Load the tri-method skill. Read ~/.tri/commands/plan.md fully and execute it with arguments: {{args}}"

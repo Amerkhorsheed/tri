@@ -1,0 +1,2 @@
+description = "Record an architectural decision"
+prompt = "Load the tri-method skill. Read ~/.tri/commands/adr.md fully and execute it with arguments: {{args}}"

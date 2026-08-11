@@ -1,0 +1,2 @@
+description = "Check configured TRI companion documents"
+prompt = "Load the tri-method skill. Read ~/.tri/commands/companions.md fully and execute it with arguments: {{args}}"

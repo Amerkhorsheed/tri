@@ -1,0 +1,21 @@
+{
+  "name": "tri",
+  "version": "3.1.0",
+  "description": "Task register, decision registers, and evidence-gated delivery with native multi-agent orchestration.",
+  "author": {"name": "Amer Khorsheed", "url": "https://github.com/Amerkhorsheed"},
+  "homepage": "https://github.com/Amerkhorsheed/tri",
+  "repository": "https://github.com/Amerkhorsheed/tri",
+  "license": "MIT",
+  "keywords": ["delivery", "task-register", "evidence", "multi-agent"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "TRI",
+    "shortDescription": "Evidence-gated delivery with safe parallel agents.",
+    "longDescription": "Plan, claim, execute, verify, and integrate tasks through a host-neutral engine and native Codex workers.",
+    "developerName": "Amer Khorsheed",
+    "category": "Coding",
+    "capabilities": ["Interactive", "Read", "Write"],
+    "websiteURL": "https://github.com/Amerkhorsheed/tri",
+    "defaultPrompt": ["Use TRI to continue this project.", "Run the ready TRI task queue safely."]
+  }
+}

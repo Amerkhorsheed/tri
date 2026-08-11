@@ -1,0 +1,15 @@
+{
+  "name": "tri-method",
+  "version": "3.1.0",
+  "description": "Task register, decision registers, and evidence-gated delivery for coding agents",
+  "license": "MIT",
+  "keywords": ["pi-package", "agent-skills", "delivery", "multi-agent"],
+  "pi": {
+    "extensions": ["./extensions/pi/index.ts"],
+    "skills": ["./skills"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}

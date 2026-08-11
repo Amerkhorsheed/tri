@@ -1,0 +1,2 @@
+description = "Rebaseline governing documents and tasks in order"
+prompt = "Load the tri-method skill. Read ~/.tri/commands/rebaseline.md fully and execute it with arguments: {{args}}"

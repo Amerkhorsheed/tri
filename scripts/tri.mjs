@@ -9,6 +9,7 @@ import { join, dirname, resolve, basename, relative, isAbsolute } from 'node:pat
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
+import { HOST_ADAPTERS } from './host-capabilities.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const TEMPLATES = join(SCRIPT_DIR, '..', 'templates');
@@ -32,8 +33,9 @@ const COMMAND_META = {
   'claim-ref': {}, 'claim-token': {}, meta: {},
 };
 const META = {
-  version: '3.0.0', profiles: PROFILES, statuses: STATUSES, specificationStatuses: SPECIFICATION_STATUSES,
-  runModes: RUN_MODES, idStrategies: ID_STRATEGIES, configKeys: [...CONFIG_KEYS].sort(), commands: COMMAND_META,
+  version: '3.1.0', profiles: PROFILES, statuses: STATUSES, specificationStatuses: SPECIFICATION_STATUSES,
+  runModes: RUN_MODES, hostAdapters: HOST_ADAPTERS, idStrategies: ID_STRATEGIES,
+  configKeys: [...CONFIG_KEYS].sort(), commands: COMMAND_META,
 };
 const REBASELINE_LAYERS = [
   { id: 'charter', label: 'charter', paths: ['PROJECT_CHARTER.md'] },
@@ -1417,6 +1419,7 @@ function cmdRunState(args) {
     try {
       const state = JSON.parse(readFileSync(p, 'utf8'));
       state.requestedMode ??= state.mode ?? 'sequential'; state.actualMode ??= state.mode ?? 'sequential';
+      state.adapter ??= 'legacy'; state.backend ??= state.actualMode === 'sequential' ? 'sequential' : 'legacy-host';
       state.capacity ??= state.actualMode === 'sequential' ? 1 : 4; state.active ??= {}; state.workers ??= {};
       return state;
     } catch (error) { fail(`run state is not valid JSON: ${error.message}`); }
@@ -1443,20 +1446,26 @@ function cmdRunState(args) {
     const capacity = Number(argValue(args, '--capacity') ?? 4);
     if (!Number.isInteger(capacity) || capacity < 1 || capacity > 16) fail('run capacity must be an integer from 1 to 16');
     const parallelism = Math.min(capacity, declaredParallelism(queue, tasks));
-    const teamCapable = args.includes('--team-capable');
+    const adapter = argValue(args, '--adapter') ?? 'generic';
+    if (!HOST_ADAPTERS[adapter]) fail(`unknown host adapter "${adapter}" (${Object.keys(HOST_ADAPTERS).join('|')})`);
+    const capabilities = HOST_ADAPTERS[adapter];
+    const parallelCapable = capabilities.parallel;
+    const teamCapable = capabilities.team && args.includes('--team-capable');
     const phases = new Set(queue.map((id) => basename(dirname(tasks.get(id).file))));
     const teamRelated = phases.size === 1;
     let actualMode = requestedMode;
-    if (requestedMode === 'auto') actualMode = teamCapable && teamRelated && parallelism >= 4 ? 'team' : parallelism >= 2 ? 'parallel' : 'sequential';
-    if (requestedMode === 'team' && !teamCapable) actualMode = parallelism >= 2 ? 'parallel' : 'sequential';
-    if (requestedMode === 'parallel' && parallelism < 2) actualMode = 'sequential';
+    if (requestedMode === 'auto') actualMode = teamCapable && teamRelated && parallelism >= 4 ? 'team' : parallelCapable && parallelism >= 2 ? 'parallel' : 'sequential';
+    if (requestedMode === 'team' && !teamCapable) actualMode = parallelCapable && parallelism >= 2 ? 'parallel' : 'sequential';
+    if (requestedMode === 'parallel' && (!parallelCapable || parallelism < 2)) actualMode = 'sequential';
+    const backend = actualMode === 'sequential' ? 'sequential' : actualMode === 'team' ? 'claude-team' : capabilities.backend;
     if (actualMode !== 'sequential') for (const warning of runOverlapWarnings(queue, tasks)) out(`warning: ${warning}; those tasks will serialize`);
     const state = {
-      version: 2, scope, mode: actualMode, requestedMode, actualMode, capacity: actualMode === 'sequential' ? 1 : capacity,
-      queue, done: [], blocked: [], active: {}, workers: {}, startedAt: new Date().toISOString(), finishedAt: null,
+      version: 3, scope, adapter, backend, mode: actualMode, requestedMode, actualMode,
+      capacity: actualMode === 'sequential' ? 1 : capacity, queue, done: [], blocked: [], active: {}, workers: {},
+      startedAt: new Date().toISOString(), finishedAt: null,
     };
     save(state);
-    out(`run started: ${scope} (requested ${requestedMode}, actual ${actualMode}, capacity ${state.capacity}), ${queue.length} queued — ${queue.join(', ')}`);
+    out(`run started: ${scope} (adapter ${adapter}, backend ${backend}, requested ${requestedMode}, actual ${actualMode}, capacity ${state.capacity}), ${queue.length} queued — ${queue.join(', ')}`);
     return;
   }
 
@@ -1520,7 +1529,7 @@ function cmdRunState(args) {
   if (!state || state.finishedAt) { out('no active run'); return; }
   if (args.includes('--json')) { out(JSON.stringify(state, null, 2)); return; }
   const remaining = state.queue.filter((id) => !state.done.includes(id) && !state.blocked.includes(id));
-  out(`run: ${state.scope} (${state.actualMode}, requested ${state.requestedMode}), started ${state.startedAt}`);
+  out(`run: ${state.scope} (${state.actualMode}, requested ${state.requestedMode}, adapter ${state.adapter}, backend ${state.backend}), started ${state.startedAt}`);
   out(`  active: ${Object.entries(state.active ?? {}).map(([name, item]) => `${name}:${item.task}`).join(', ') || 'none'}`);
   out(`  done: ${state.done.join(', ') || 'none'}`);
   out(`  blocked: ${state.blocked.join(', ') || 'none'}`);
@@ -1926,7 +1935,7 @@ if (!cmd || !(cmd in commands)) {
   claim T-NNNN --by <name> [--force]     (dynamic pull-based claiming; advisory, warns but never blocks on deps)
   release T-NNNN | done T-NNNN | next | status | graph | validate
   visualize [--out path]                 (self-contained HTML board, default .tri/graph.html)
-  run-state [--start <scope> --queue <ID,..> [--mode m]] [--done ID] [--blocked ID] [--finish]
+  run-state [--start <scope> --queue <ID,..> [--mode m] [--adapter host]] [--done ID] [--blocked ID] [--finish]
   new-adr --title "..." | register --kind decision|blocker|assumption --text "..."
   sync | evidence ID [--name check] -- command [args...] | companions [--check] | doctor
   claim-token ID --by owner | claim-ref ID | verify-scope ID --base commit

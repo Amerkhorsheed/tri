@@ -16,13 +16,14 @@ Every parallel candidate needs exact repository-relative `Expected files` entrie
 
 ## 2. Start scheduler and reserve claims
 
-Run:
+Detect the active host, then start with the adapter arguments it reports:
 
 ```bash
-node ~/.tri/scripts/tri.mjs run-state --start "<scope>" --mode auto --capacity 4 --queue <IDs> [--team-capable]
+node ~/.tri/scripts/tri-host.mjs --json
+node ~/.tri/scripts/tri.mjs run-state --start "<scope>" --mode auto --capacity 4 --queue <IDs> --adapter <adapter> [--team-capable]
 ```
 
-Pass `--team-capable` only when native Claude Code teams are actually available. Read the reported **actual** mode. Never describe a sequential fallback as parallel.
+Use an explicit host probe when auto-detection returns `generic`. Pass its `adapter` and optional team argument exactly. Gemini's bundled subagent is experimental: the probe selects `gemini-agents` only when settings prove it is enabled, otherwise it selects sequential `gemini`. Antigravity currently declares sequential because it has no verified programmable worker interface. Read the reported **adapter**, **backend**, and **actual** mode. Never describe a fallback as parallel.
 
 Lease the next worker batch, then create a unique token for each active task with `tri.mjs claim-token <ID> --by <worker>`. Atomically push each returned token to its returned ref with an empty lease expectation:
 
@@ -36,9 +37,14 @@ Tokens have the integration HEAD as parent, so same-base contenders still produc
 
 Request a worker batch atomically with `run-state --lease worker-1,worker-2,...`. For each non-null assignment, create one disposable Git worktree and branch from the integration HEAD, then run `claim <ID> --by <worker>` inside it before implementation. Never let workers share a checkout or call lease concurrently from worker processes.
 
-- **parallel:** issue all `Agent` tool calls in one assistant turn using the `tri-worker` agent—one per leased independent chain. Do not implement tasks in the orchestrator while workers are active.
-- **team:** create one native Claude Code team, give each teammate its leased task/worktree, and use the shared task list for coordination. Use teams only when TRI selected `team`; dependency-chain tasks still serialize.
+- **Claude / `claude-agent`:** issue all `Agent` calls in one assistant turn with `tri-worker`, one per leased chain.
+- **Codex / `codex-spawn-agent`:** issue native `spawn_agent` calls together with `agent_type: tri_worker`; install it once with `~/.tri/scripts/install-codex-agent.sh` if absent.
+- **Pi / `pi-workers`:** call `tri_workers` once with the whole leased batch; it rejects duplicate worktrees, runs child Pi processes concurrently, propagates cancellation, and reports observed peak workers.
+- **Gemini / `gemini-subagent`:** invoke the bundled `tri-worker` subagent once per lease in one parallel tool batch. Require `experimental.enableAgents`; these workers run in YOLO mode, so distinct worktrees and exact scopes are mandatory.
+- **team / `claude-team`:** create one native Claude Code team only when TRI selected `team`.
 - **sequential:** one lease and one worker at a time.
+
+Do not implement tasks in the orchestrator while workers are active. The orchestrator alone calls `run-state --lease`; workers never lease their own work.
 
 If the host cannot launch the reported backend, stop and restart state with the backend it can actually run. No silent fallback.
 

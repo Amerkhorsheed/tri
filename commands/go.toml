@@ -1,0 +1,2 @@
+description = "Read TRI state, choose the right workflow, and run it"
+prompt = "Load the tri-method skill. Read ~/.tri/commands/go.md fully and execute it with arguments: {{args}}"
