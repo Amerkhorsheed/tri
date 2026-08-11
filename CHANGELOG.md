@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.1.2 — 2026-08-11
+
+- Allows `tri register` during active tracked edits so decisions and assumptions can be recorded in the same change they govern; Git conflict, detached-head, and branch-start protections remain enforced.
+
 ## 3.1.1 — 2026-08-11
 
 - Made adopted task prose compatible with engine gates: leading `Specified`, `Unrevised`, and `Withdrawn` code tokens may carry explanatory text, and the historical `Implemented before the re-baseline` marker retains `Specified` semantics.

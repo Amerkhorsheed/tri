@@ -1,6 +1,6 @@
 {
   "name": "tri",
-  "version": "3.1.1",
+  "version": "3.1.2",
   "description": "Task register, decision registers, and evidence-gated delivery with native multi-agent orchestration.",
   "author": {"name": "Amer Khorsheed", "url": "https://github.com/Amerkhorsheed"},
   "homepage": "https://github.com/Amerkhorsheed/tri",
