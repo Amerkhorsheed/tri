@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.1.1 — 2026-08-11
+
+- Made adopted task prose compatible with engine gates: leading `Specified`, `Unrevised`, and `Withdrawn` code tokens may carry explanatory text, and the historical `Implemented before the re-baseline` marker retains `Specified` semantics.
+- Auto-discovers canonical root `DECISIONS.md` and `ASSUMPTIONS.md` when an adopted workspace does not configure `decisionFiles`.
+- Treats legacy prose or glob-like `Expected files` as a serialization warning rather than making the entire workspace impossible to validate; exact claim manifests and parallel scope verification remain strict.
+- Reproduced against Compass: its 394-task corpus now validates without task normalization.
+
 ## 3.1.0 — 2026-08-11
 
 - Added native Codex plugin commands and a `tri_worker` profile for stable `spawn_agent` execution.

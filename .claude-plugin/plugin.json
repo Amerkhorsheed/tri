@@ -1,7 +1,7 @@
 {
   "name": "tri",
   "description": "TRI v3 delivery engine: decentralized IDs, Git-backed claims, structured evidence gates, and native Claude, Codex, Pi, and Gemini adapters.",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "homepage": "https://github.com/Amerkhorsheed/tri",
   "author": {
     "name": "Amer Khorsheed"

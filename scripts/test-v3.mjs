@@ -69,6 +69,33 @@ check('config rejects unknown keys and paths outside the repository', () => {
   includes(run(w, ['validate'], true), 'unknown Specification status');
 });
 
+check('adopted task prose preserves canonical specification status semantics', () => {
+  const w = mkdtempSync(join(tmpdir(), 'tri-v3-spec-prose-'));
+  writeFileSync(join(w, 'tri.config.json'), JSON.stringify({ version: 2, profile: 'lite', taskDir: 'tasks', idStrategy: 'random', workflow: 'trunk' }));
+  const dir = join(w, 'tasks/phase-01'); mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'T-0001.md'), `${task('T-0001')}\n## Specification status\n\n\`Specified\` — written against current decisions.\n`);
+  writeFileSync(join(dir, 'T-0002.md'), `${task('T-0002')}\n## Specification status\n\n\`Unrevised\` — predates the baseline.\n\nClarify before implementation.\n`);
+  writeFileSync(join(dir, 'T-0003.md'), `${task('T-0003').replace('Planned', 'Withdrawn')}\n## Specification status\n\n\`Withdrawn\` — retained as a record.\n`);
+  writeFileSync(join(dir, 'T-0004.md'), `${task('T-0004').replace('Planned', 'Done')}\n## Specification status\n\n\`Implemented before the re-baseline\` — historical completed work.\n`);
+  writeFileSync(join(dir, 'T-0005.md'), `${task('T-0005').replace('- src/a.js', 'Files will be selected after prerequisites land; legacy notes mention src/**/*.js.')}\n## Specification status\n\n\`Unrevised\` — exact paths are intentionally deferred.\n`);
+  writeFileSync(join(dir, 'T-0006.md'), `${task('T-0006').replace('Planned', 'Done')}\n## Specification status\n\nImplemented before the re-baseline — bare historical marker.\n`);
+  includes(run(w, ['validate']), 'valid: 6 tasks');
+  const status = JSON.parse(run(w, ['status', '--json']));
+  assert(status.ready.some((entry) => entry.id === 'T-0001' && entry.specificationStatus === 'Specified'), 'explained Specified token was not canonicalized');
+});
+
+check('adopted root decision and assumption registers are discovered by default', () => {
+  const w = mkdtempSync(join(tmpdir(), 'tri-v3-root-registers-'));
+  writeFileSync(join(w, 'tri.config.json'), JSON.stringify({ version: 2, profile: 'lite', taskDir: 'tasks', idStrategy: 'random', workflow: 'trunk' }));
+  mkdirSync(join(w, 'tasks'), { recursive: true });
+  writeFileSync(join(w, 'DECISIONS.md'), '# Decision Register\n\n## Resolved Direction\n\n| ID | Decision | Rationale |\n|---|---|---|\n\n## Blocking Decisions\n\n| ID | Decision | Owner | Blocks |\n|---|---|---|---|\n');
+  writeFileSync(join(w, 'ASSUMPTIONS.md'), '# Assumption Register\n\n| ID | Assumption | Why it matters | Invalidated by |\n|---|---|---|---|\n');
+  run(w, ['register', '--kind', 'decision', '--text', 'Use root registers', '--rationale', 'Adopted workspace']);
+  run(w, ['register', '--kind', 'assumption', '--text', 'Root is canonical', '--why', 'Existing corpus']);
+  includes(readFileSync(join(w, 'DECISIONS.md'), 'utf8'), 'Use root registers');
+  includes(readFileSync(join(w, 'ASSUMPTIONS.md'), 'utf8'), 'Root is canonical');
+});
+
 check('evidence stores hashes and TRI version, not raw output', () => {
   const taskDir = join(ws, 'tri/tasks/phase-01');
   const file = readdirSync(taskDir).map((name) => join(taskDir, name)).find((path) => readFileSync(path, 'utf8').includes('## Dependencies\n\nN/A'));
@@ -77,7 +104,7 @@ check('evidence stores hashes and TRI version, not raw output', () => {
   writeFileSync(join(ws, 'emit-secret.mjs'), 'console.log("secret-output")\n');
   run(ws, ['evidence', id, '--name', 'suite', '--', 'node', 'emit-secret.mjs', '-H', 'X-API-Key: release-blocker-secret', '--cookie', 'session=cookie-secret']);
   const record = readdirSync(join(ws, 'tri/evidence')).map((name) => readFileSync(join(ws, 'tri/evidence', name), 'utf8')).join('\n');
-  includes(record, 'outputSha256'); includes(record, '"tri": "3.1.0"');
+  includes(record, 'outputSha256'); includes(record, '"tri": "3.1.1"');
   assert(!record.includes('secret-output'), 'raw command output persisted');
   assert(!record.includes('release-blocker-secret'), 'API key header persisted');
   assert(!record.includes('cookie-secret'), 'authentication cookie persisted');
@@ -178,7 +205,7 @@ check('visualization contains board and dependency graph views', () => {
 
 check('metadata exposes the authoritative engine contract', () => {
   const meta = JSON.parse(run(ws, ['meta']));
-  assert(meta.version === '3.1.0', 'wrong metadata version');
+  assert(meta.version === '3.1.1', 'wrong metadata version');
   assert(meta.commands['verify-scope'] && meta.configKeys.includes('idStrategy') && meta.hostAdapters.pi.backend === 'pi-workers', 'metadata incomplete');
 });
 

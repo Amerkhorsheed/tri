@@ -33,7 +33,7 @@ const COMMAND_META = {
   'claim-ref': {}, 'claim-token': {}, meta: {},
 };
 const META = {
-  version: '3.1.0', profiles: PROFILES, statuses: STATUSES, specificationStatuses: SPECIFICATION_STATUSES,
+  version: '3.1.1', profiles: PROFILES, statuses: STATUSES, specificationStatuses: SPECIFICATION_STATUSES,
   runModes: RUN_MODES, hostAdapters: HOST_ADAPTERS, idStrategies: ID_STRATEGIES,
   configKeys: [...CONFIG_KEYS].sort(), commands: COMMAND_META,
 };
@@ -147,6 +147,16 @@ function requireGit(root) {
   if (repository.status !== 0) fail('TRI v3 requires a Git repository after init');
 }
 
+function defaultDecisionFiles(root) {
+  return [
+    ['DECISIONS.md', '# Decision Register', 'tri/DECISIONS.md'],
+    ['ASSUMPTIONS.md', '# Assumption Register', 'tri/ASSUMPTIONS.md'],
+  ].map(([candidate, heading, fallback]) => {
+    const path = join(root, candidate);
+    return existsSync(path) && readFileSync(path, 'utf8').includes(heading) ? candidate : fallback;
+  });
+}
+
 function loadConfig() {
   const root = findRoot();
   if (!root) fail('no tri.config.json found — run `tri init` in the project root first');
@@ -162,7 +172,7 @@ function loadConfig() {
     version, root, profile: 'standard', taskDir: 'tri/tasks', idPrefix: 'T-', idWidth: 4,
     idStrategy: version >= 2 ? 'random' : 'sequential', evidenceDir: 'tri/evidence', statuses,
     companionFiles: [], companions: [], companionHooks: {}, claimScope: {}, adrDir: 'tri/adr',
-    decisionFiles: ['tri/DECISIONS.md', 'tri/ASSUMPTIONS.md'], runtimeProbes: [], expectedEnvironment: null,
+    decisionFiles: defaultDecisionFiles(root), runtimeProbes: [], expectedEnvironment: null,
     requiredChecks: [], workflow: 'trunk', ...cfg, statuses,
   };
   validateConfig(merged);
@@ -556,6 +566,17 @@ function taskFiles(cfg) {
   return files.sort();
 }
 
+function canonicalSpecificationStatus(value) {
+  if (value === undefined) return 'Specified';
+  const firstLine = value.split('\n')[0].trim();
+  const codeToken = firstLine.match(/^`([^`]+)`(?:\s*(?:—|–|-|:)\s+.*)?$/)?.[1];
+  const historical = 'Implemented before the re-baseline';
+  if (codeToken === historical || firstLine === historical || firstLine.startsWith(`${historical} —`)) return 'Specified';
+  const token = codeToken ?? SPECIFICATION_STATUSES.find((status) =>
+    firstLine === status || new RegExp(`^${status}\\s*(?:—|–|-|:)\\s+`).test(firstLine));
+  return token ?? value;
+}
+
 function parseTask(file, cfg) {
   const text = readFileSync(file, 'utf8');
   const sections = {};
@@ -573,7 +594,7 @@ function parseTask(file, cfg) {
   return {
     id, file, text, sections,
     status: sections['Status'] ?? '',
-    specificationStatus: sections['Specification status'] ?? 'Specified',
+    specificationStatus: canonicalSpecificationStatus(sections['Specification status']),
     assignee: sections['Assignee'] ?? 'N/A',
     priority: sections['Priority'] ?? 'P1',
     title: (text.match(new RegExp(`^# ${cfg.idPrefix.replace(/[-]/g, '\\-')}${ID_PART_SOURCE}:\\s*(.+)$`, 'mi')) ?? [,''])[1],
@@ -1033,9 +1054,10 @@ function cmdValidate(args = []) {
     if (t.specificationStatus === 'Unrevised') warnings.push(`${t.id}: specification is Unrevised; run clarify before claiming`);
     const withdrawnDeps = t.deps.filter((d) => map.get(d)?.status === 'Withdrawn' || map.get(d)?.specificationStatus === 'Withdrawn');
     if (withdrawnDeps.length) warnings.push(`${t.id}: depends on Withdrawn task(s): ${withdrawnDeps.join(', ')}`);
-    if (t.sections['Expected files'] && /[*?[\]{}]/.test(t.sections['Expected files'])) errors.push(`${t.id}: Expected files does not support globs`);
-    if (t.sections['Expected files'] && t.sections['Expected files'] !== 'N/A' && !taskExpectedFiles(t).length) errors.push(`${t.id}: Expected files must contain exact repository-relative files or directories`);
-    if (cfg.profile !== 'lite' && t.specificationStatus === 'Specified' && !taskExpectedFiles(t).length) warnings.push(`${t.id}: no exact Expected files; parallel execution will serialize it`);
+    const expectedFiles = t.sections['Expected files'];
+    const hasExactFiles = taskExpectedFiles(t).length > 0;
+    if (expectedFiles && expectedFiles !== 'N/A' && !hasExactFiles) warnings.push(`${t.id}: Expected files has no usable exact repository-relative paths; parallel execution will serialize it`);
+    else if (cfg.profile !== 'lite' && t.specificationStatus === 'Specified' && !hasExactFiles) warnings.push(`${t.id}: no exact Expected files; parallel execution will serialize it`);
   }
   const state = new Map();
   const stack = [];
@@ -1355,8 +1377,10 @@ function withRunLock(cfg, fn) {
 }
 
 function taskExpectedFiles(t) {
+  const section = t?.sections['Expected files'] ?? '';
+  if (/[*?[\]{}]/.test(section)) return [];
   const paths = new Set();
-  for (const raw of (t?.sections['Expected files'] ?? '').split('\n')) {
+  for (const raw of section.split('\n')) {
     const value = raw.replace(/^\s*[-*]\s*/, '').replaceAll('`', '').trim().replace(/^\.\//, '');
     if (!value || value === 'N/A' || /\s|[*?[\]{}]/.test(value) || !/^[A-Za-z0-9._/-]+$/.test(value) || value.split(/[\\/]+/).includes('..')) continue;
     paths.add(value);
