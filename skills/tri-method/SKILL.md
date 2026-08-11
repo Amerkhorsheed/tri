@@ -51,7 +51,7 @@ git rev-parse --git-dir && git status --porcelain=v1 --branch && git branch --sh
 | Not a git repository | Proceed, but say once that no branch or claim protection exists here |
 | `MERGE_HEAD`, `CHERRY_PICK_HEAD`, or a rebase in progress | **Stop.** Finish or abort the operation first; committing into it corrupts the history |
 | Detached HEAD | **Stop.** Commits would be unreachable. Ask which branch to move to |
-| Tracked files modified or staged | **Stop.** Report exactly what is dirty and ask: commit, stash, or proceed deliberately. Never build new work on a half-finished edit |
+| Tracked files modified or staged | Commands that begin new work **stop**: report what is dirty and ask whether to commit or stash. `tri register` is the deliberate exception—it may append a decision or assumption to the active change it governs. |
 | Untracked files only | Proceed, but list them — they are often the previous session's unfinished work |
 | `branch-pr` and on the default branch | Create the work branch **before** the first commit |
 | `branch-pr` and on an unrelated task's branch | Say so; branch from the default branch instead. Stacking unrelated work makes that PR unreviewable |

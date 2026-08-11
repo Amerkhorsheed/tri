@@ -29,11 +29,11 @@ const COMMAND_META = {
   claim: { mutates: true, clean: true, claim: true }, release: { mutates: true }, done: { mutates: true },
   status: {}, graph: {}, visualize: { scratch: true }, 'run-state': { mutates: true }, sync: {},
   evidence: { mutates: true }, companions: {}, doctor: {}, rebaseline: { mutates: true },
-  'new-adr': { mutates: true, clean: true }, register: { mutates: true, clean: true }, 'verify-scope': {},
+  'new-adr': { mutates: true, clean: true }, register: { mutates: true }, 'verify-scope': {},
   'claim-ref': {}, 'claim-token': {}, meta: {},
 };
 const META = {
-  version: '3.1.1', profiles: PROFILES, statuses: STATUSES, specificationStatuses: SPECIFICATION_STATUSES,
+  version: '3.1.2', profiles: PROFILES, statuses: STATUSES, specificationStatuses: SPECIFICATION_STATUSES,
   runModes: RUN_MODES, hostAdapters: HOST_ADAPTERS, idStrategies: ID_STRATEGIES,
   configKeys: [...CONFIG_KEYS].sort(), commands: COMMAND_META,
 };
@@ -924,7 +924,7 @@ function appendTableRow(text, heading, row) {
 
 function cmdRegister(args) {
   const cfg = loadConfig();
-  projectPreflight(cfg, { clean: true, start: true });
+  projectPreflight(cfg, { start: true });
   if (cfg.idStrategy === 'sequential') refreshRemote(cfg);
   const kind = argValue(args, '--kind') ?? fail('--kind decision|blocker|assumption required');
   const text = argValue(args, '--text') ?? fail('--text required');

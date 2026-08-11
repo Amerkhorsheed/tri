@@ -34,7 +34,7 @@ codex plugin add tri@tri
 Pi — install the package (skill, `/tri:*` commands, selectable questions, and cancellable parallel worker tool):
 
 ```bash
-pi install git:github.com/Amerkhorsheed/tri@v3.1.1
+pi install git:github.com/Amerkhorsheed/tri@v3.1.2
 ```
 
 Gemini CLI — install the extension, which bundles commands, the skill, and `tri-worker`. Native subagents are experimental and must be enabled with `{"experimental":{"enableAgents":true}}` in Gemini settings:
