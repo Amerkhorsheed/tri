@@ -106,7 +106,7 @@ check('evidence stores hashes and TRI version, not raw output', () => {
   writeFileSync(join(ws, 'emit-secret.mjs'), 'console.log("secret-output")\n');
   run(ws, ['evidence', id, '--name', 'suite', '--', 'node', 'emit-secret.mjs', '-H', 'X-API-Key: release-blocker-secret', '--cookie', 'session=cookie-secret']);
   const record = readdirSync(join(ws, 'tri/evidence')).map((name) => readFileSync(join(ws, 'tri/evidence', name), 'utf8')).join('\n');
-  includes(record, 'outputSha256'); includes(record, '"tri": "3.1.2"');
+  includes(record, 'outputSha256'); includes(record, '"tri": "3.2.0"');
   assert(!record.includes('secret-output'), 'raw command output persisted');
   assert(!record.includes('release-blocker-secret'), 'API key header persisted');
   assert(!record.includes('cookie-secret'), 'authentication cookie persisted');
@@ -207,8 +207,9 @@ check('visualization contains board and dependency graph views', () => {
 
 check('metadata exposes the authoritative engine contract', () => {
   const meta = JSON.parse(run(ws, ['meta']));
-  assert(meta.version === '3.1.2', 'wrong metadata version');
+  assert(meta.version === '3.2.0', 'wrong metadata version');
   assert(meta.commands['verify-scope'] && meta.configKeys.includes('idStrategy') && meta.hostAdapters.pi.backend === 'pi-workers', 'metadata incomplete');
+  assert(meta.hostAdapters.cursor.backend === 'cursor-task-tri-worker' && meta.hostAdapters.cursor.parallel, 'Cursor adapter missing');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

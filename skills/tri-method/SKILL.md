@@ -116,6 +116,7 @@ Autonomous multi-task execution uses a host-neutral scheduler in `.tri/run.json`
 - **Sequential** — one lease at a time when the adapter cannot prove a parallel worker interface or no safe parallel frontier exists.
 - **Claude Code** — bundled `tri-worker` Agent calls; native teams only when explicitly available.
 - **Codex** — native stable multi-agent `spawn_agent` calls with the installed `tri_worker` profile.
+- **Cursor** — Task tool calls with `subagent_type: "tri-worker"`; install skill + agent via `scripts/install-cursor.sh`.
 - **Pi** — the packaged `tri_workers` extension tool spawns cancellable child Pi processes concurrently in supplied worktrees.
 - **Gemini CLI** — bundled experimental `tri-worker` subagent; enable agents explicitly and remember that child tools run in YOLO mode.
 

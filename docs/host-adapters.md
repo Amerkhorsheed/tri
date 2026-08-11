@@ -13,6 +13,7 @@ The engine owns task state, claims, scopes, evidence, leases, and completion gat
 |---|---|---|---|
 | Claude Code | plugin `/tri:*` | `tri-worker` Agent; optional native team | Native |
 | Codex | plugin `/tri:*` + `tri_worker` profile | stable `spawn_agent` | Native |
+| Cursor | skill + `~/.cursor/agents/tri-worker` | Task `subagent_type: tri-worker` | Native |
 | Pi | package `/tri:*` + `tri_workers` tool | cancellable Pi child processes | Native |
 | Gemini CLI | extension commands + bundled `tri-worker` | `gemini-agents` experimental local subagent | Native when explicitly enabled; otherwise sequential; YOLO child tools |
 | Antigravity | `AGENTS.md` + Agent Skills | none verified | Sequential, fail-safe |
@@ -24,4 +25,4 @@ Probe the current session:
 node ~/.tri/scripts/tri-host.mjs --json
 ```
 
-Pass the returned `runStateArgs` to `run-state --start`; Gemini uses `gemini-agents` only when its settings prove agents are enabled. Set `TRI_HOST` only when automatic environment detection returns `generic`. The engine rejects unknown adapters and records the backend in `.tri/run.json`; a host cannot claim parallel work merely because multiple tasks exist.
+Pass the returned `runStateArgs` to `run-state --start`; Gemini uses `gemini-agents` only when its settings prove agents are enabled. Cursor is detected from `CURSOR_AGENT=1` and wins over Claude-adjacent environment variables. Set `TRI_HOST` only when automatic environment detection returns `generic`. The engine rejects unknown adapters and records the backend in `.tri/run.json`; a host cannot claim parallel work merely because multiple tasks exist.

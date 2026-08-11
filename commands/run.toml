@@ -1,2 +1,2 @@
 description = "Execute TRI tasks with the native host adapter"
-prompt = "Load the tri-method skill. Read ~/.tri/commands/run.md fully and execute it with arguments: {{args}}. Detect and declare the host adapter before starting run-state; in Codex use tri_worker through native spawn_agent, and in Gemini use the bundled tri-worker subagent."
+prompt = "Load the tri-method skill. Read ~/.tri/commands/run.md fully and execute it with arguments: {{args}}. Detect and declare the host adapter before starting run-state; in Codex use tri_worker through native spawn_agent, in Cursor use Task with subagent_type tri-worker, and in Gemini use the bundled tri-worker subagent."

@@ -91,6 +91,13 @@ for (const cmd of commands) {
 check(read('agents/tri-worker.md').includes('kind: local'), 'Gemini tri-worker is not a local agent');
 check(read('agents/tri-worker.toml').includes('name = "tri_worker"'), 'Codex tri_worker profile is missing');
 check(read('package.json').includes('extensions/pi/index.ts'), 'Pi package does not expose its extension');
+check(existsSync(join(ROOT, 'scripts/install-cursor.sh')), 'Cursor installer script is missing');
+check(read('scripts/install-cursor.sh').includes('~/.cursor') || read('scripts/install-cursor.sh').includes('$cursor_home'), 'Cursor installer does not target Cursor home');
+check(meta.hostAdapters.cursor?.backend === 'cursor-task-tri-worker', 'engine metadata lacks Cursor adapter');
+check(readme.includes('Cursor'), 'README.md does not document Cursor');
+check(skill.includes('Cursor'), 'SKILL.md does not document Cursor');
+check(read('docs/host-adapters.md').includes('Cursor'), 'docs/host-adapters.md does not document Cursor');
+check(read('commands/run.md').includes('cursor-task-tri-worker'), 'commands/run.md lacks Cursor worker launch');
 
 // --- 8. referenced files exist ---
 for (const m of readme.matchAll(/\]\((docs\/[^)]+|scripts\/[^)]+)\)/g)) {

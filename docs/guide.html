@@ -33,7 +33,7 @@ li{margin:4px 0}
 <pre><code>git clone git@github.com:Amerkhorsheed/tri.git ~/.tri
 claude plugin marketplace add Amerkhorsheed/tri
 claude plugin install tri@tri</code></pre>
-<p>Codex installs the TRI plugin plus <code>scripts/install-codex-agent.sh</code>; Pi installs this repository as a git package; Gemini installs it as an extension and explicitly enables experimental agents. Antigravity and generic hosts use <code>AGENTS.md</code> and fail safe to sequential when no programmable worker interface is verified.</p>
+<p>Codex installs the TRI plugin plus <code>scripts/install-codex-agent.sh</code>; Cursor installs the skill and worker with <code>scripts/install-cursor.sh</code>; Pi installs this repository as a git package; Gemini installs it as an extension and explicitly enables experimental agents. Antigravity and generic hosts use <code>AGENTS.md</code> and fail safe to sequential when no programmable worker interface is verified.</p>
 <p><b>New project:</b> <code>/tri:init standard</code> &nbsp;·&nbsp; <b>Existing task tree:</b> write a <code>tri.config.json</code> adapter — files stay byte-for-byte unchanged.</p>
 </section>
 
@@ -67,7 +67,7 @@ claude plugin install tri@tri</code></pre>
 <ol>
 <li>Run resolves scope, then automatically computes maximal declared-safe concurrency from dependencies and exact Expected files.</li>
 <li><code>run-state --lease</code> dynamically assigns ready chains up to capacity four. Missing or overlapping scopes serialize.</li>
-<li>The host probe selects Claude Agents/teams, Codex <code>spawn_agent</code>, Pi child workers, Gemini subagents, or sequential fallback. Every worker gets an isolated Git worktree; adapter, backend, requested mode, actual mode, and peak workers are reported honestly.</li>
+<li>The host probe selects Claude Agents/teams, Codex <code>spawn_agent</code>, Cursor Task <code>tri-worker</code> subagents, Pi child workers, Gemini subagents, or sequential fallback. Every worker gets an isolated Git worktree; adapter, backend, requested mode, actual mode, and peak workers are reported honestly.</li>
 <li>Each atomic worker commit must pass scope, evidence, tests, and validation before cherry-pick onto one integration branch.</li>
 <li>Owner decisions park only their task; free worker slots immediately lease newly-ready work.</li>
 </ol>

@@ -33,7 +33,7 @@ const COMMAND_META = {
   'claim-ref': {}, 'claim-token': {}, meta: {},
 };
 const META = {
-  version: '3.1.2', profiles: PROFILES, statuses: STATUSES, specificationStatuses: SPECIFICATION_STATUSES,
+  version: '3.2.0', profiles: PROFILES, statuses: STATUSES, specificationStatuses: SPECIFICATION_STATUSES,
   runModes: RUN_MODES, hostAdapters: HOST_ADAPTERS, idStrategies: ID_STRATEGIES,
   configKeys: [...CONFIG_KEYS].sort(), commands: COMMAND_META,
 };

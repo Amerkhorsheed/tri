@@ -34,7 +34,14 @@ codex plugin add tri@tri
 Pi — install the package (skill, `/tri:*` commands, selectable questions, and cancellable parallel worker tool):
 
 ```bash
-pi install git:github.com/Amerkhorsheed/tri@v3.1.2
+pi install git:github.com/Amerkhorsheed/tri@v3.2.0
+```
+
+Cursor — install the skill and `tri-worker` subagent (detects `CURSOR_AGENT=1` for parallel Task workers):
+
+```bash
+git clone git@github.com:Amerkhorsheed/tri.git ~/.tri   # if not already
+~/.tri/scripts/install-cursor.sh
 ```
 
 Gemini CLI — install the extension, which bundles commands, the skill, and `tri-worker`. Native subagents are experimental and must be enabled with `{"experimental":{"enableAgents":true}}` in Gemini settings:
@@ -80,7 +87,7 @@ Direct script use (what agents and CI run):
 
 ```bash
 node scripts/tri.mjs <init|new-task|new-adr|register|validate|next|claim|claim-token|release|done|status|graph|visualize|run-state|verify-scope|claim-ref|sync|evidence|companions|doctor|rebaseline|meta>
-node scripts/tri-host.mjs [claude|codex|pi|gemini|antigravity|generic] --json
+node scripts/tri-host.mjs [claude|codex|cursor|pi|gemini|antigravity|generic] --json
 ```
 
 ## Branch and PR workflows
@@ -89,7 +96,7 @@ node scripts/tri-host.mjs [claude|codex|pi|gemini|antigravity|generic] --json
 
 ## Batch execution vs the gates
 
-`/tri:run` chooses maximal declared-safe parallelism automatically. `tri-host.mjs` declares the host capability, and the scheduler combines it with dependency readiness and exact `Expected files`, leases independent chains up to capacity four, and records adapter, backend, requested mode, and actual mode. Claude uses `tri-worker` Agents/teams, Codex uses native `spawn_agent`, Pi uses cancellable child processes, and Gemini uses its bundled experimental subagent. Every worker runs in a distinct Git worktree. Missing or overlapping scopes serialize rather than becoming merge conflicts. Each worker commit must pass `verify-scope`, structured evidence, project checks, and `validate` before the orchestrator cherry-picks it onto one integration branch. Contract/shared-interface changes remain separate review PRs. Antigravity and unknown hosts currently fail safe to sequential; no host may silently report a fallback as parallel.
+`/tri:run` chooses maximal declared-safe parallelism automatically. `tri-host.mjs` declares the host capability, and the scheduler combines it with dependency readiness and exact `Expected files`, leases independent chains up to capacity four, and records adapter, backend, requested mode, and actual mode. Claude uses `tri-worker` Agents/teams, Codex uses native `spawn_agent`, Cursor uses Task `tri-worker` subagents, Pi uses cancellable child processes, and Gemini uses its bundled experimental subagent. Every worker runs in a distinct Git worktree. Missing or overlapping scopes serialize rather than becoming merge conflicts. Each worker commit must pass `verify-scope`, structured evidence, project checks, and `validate` before the orchestrator cherry-picks it onto one integration branch. Contract/shared-interface changes remain separate review PRs. Antigravity and unknown hosts currently fail safe to sequential; no host may silently report a fallback as parallel.
 
 ## Parallel developers
 
@@ -160,4 +167,4 @@ node scripts/test-tri.mjs && node scripts/test-v3.mjs && node scripts/test-adapt
 
 The consistency check fails when a change reaches one artifact but not its companions — an undocumented command or config key, a version without a changelog entry, a stale test count, a broken link. See [CONTRIBUTING.md](CONTRIBUTING.md) for what must move together.
 
-81 behavioral tests cover legacy adapters plus v3 decentralized IDs, engine-owned ADR/register creation, config containment, structured evidence privacy, exact claims, dynamic concurrent leasing, host capability fallbacks, real overlapping worker processes, native package surfaces, Withdrawn graph semantics, and board/graph visualization.
+82 behavioral tests cover legacy adapters plus v3 decentralized IDs, engine-owned ADR/register creation, config containment, structured evidence privacy, exact claims, dynamic concurrent leasing, host capability fallbacks, real overlapping worker processes, native package surfaces, Cursor Task backend recording, Withdrawn graph semantics, and board/graph visualization.

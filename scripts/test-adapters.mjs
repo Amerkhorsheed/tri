@@ -30,14 +30,30 @@ function workspace() {
 
 await check('host probe declares only verified backends', () => {
   const pi = JSON.parse(execFileSync('node', [HOST, 'pi', '--json'], { encoding: 'utf8' }));
+  const cursor = JSON.parse(execFileSync('node', [HOST, 'cursor', '--json'], { encoding: 'utf8' }));
+  const cursorEnv = { ...process.env, CURSOR_AGENT: '1', CLAUDECODE: '1' };
+  delete cursorEnv.TRI_HOST;
+  delete cursorEnv.CODEX_THREAD_ID;
+  delete cursorEnv.CODEX_HOME;
+  delete cursorEnv.PI_CODING_AGENT;
+  const cursorDetected = JSON.parse(execFileSync('node', [HOST, '--json'], { encoding: 'utf8', env: cursorEnv }));
   const antigravity = JSON.parse(execFileSync('node', [HOST, 'antigravity', '--json'], { encoding: 'utf8' }));
   const geminiHome = mkdtempSync(join(tmpdir(), 'tri-gemini-')); writeFileSync(join(geminiHome, 'settings.json'), '{"experimental":{"enableAgents":true}}');
   const gemini = JSON.parse(execFileSync('node', [HOST, 'gemini', '--json'], { encoding: 'utf8', env: { ...process.env, GEMINI_HOME: geminiHome } }));
   const geminiOff = JSON.parse(execFileSync('node', [HOST, 'gemini', '--json'], { encoding: 'utf8', env: { ...process.env, GEMINI_HOME: join(geminiHome, 'missing') } }));
   assert(pi.parallel && pi.backend === 'pi-workers', 'Pi backend missing');
+  assert(cursor.parallel && cursor.backend === 'cursor-task-tri-worker', 'Cursor backend missing');
+  assert(cursorDetected.host === 'cursor' && cursorDetected.adapter === 'cursor', 'CURSOR_AGENT did not win over CLAUDECODE');
   assert(gemini.adapter === 'gemini-agents' && gemini.parallel, 'enabled Gemini agents not detected');
   assert(geminiOff.adapter === 'gemini' && !geminiOff.parallel, 'disabled Gemini claimed parallelism');
   assert(!antigravity.parallel && antigravity.backend === 'sequential', 'Antigravity must fail safe');
+});
+
+await check('Cursor scheduler records parallel Task backend', () => {
+  const safe = workspace();
+  execFileSync('node', [TRI, 'run-state', '--start', 'cursor', '--queue', 'T-0001,T-0002', '--adapter', 'cursor'], { cwd: safe });
+  const state = JSON.parse(execFileSync('node', [TRI, 'run-state', '--json'], { cwd: safe, encoding: 'utf8' }));
+  assert(state.actualMode === 'parallel' && state.backend === 'cursor-task-tri-worker' && state.adapter === 'cursor', 'Cursor mode not recorded');
 });
 
 await check('scheduler records adapter, backend, and honest fallback', () => {
@@ -87,6 +103,7 @@ await check('native package manifests expose every TRI command and worker', () =
   assert(JSON.parse(readFileSync(join(ROOT, 'package.json'))).pi.extensions.length === 1, 'Pi manifest missing extension');
   assert(JSON.parse(readFileSync(join(ROOT, '.codex-plugin/plugin.json'))).skills === './skills/', 'Codex skill missing');
   assert(readFileSync(join(ROOT, 'agents/tri-worker.md'), 'utf8').includes('kind: local'), 'Gemini worker missing');
+  assert(readFileSync(join(ROOT, 'scripts/install-cursor.sh'), 'utf8').includes('tri-worker.md'), 'Cursor installer missing');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
