@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.0.0 — 2026-08-11
+
+- Moved safety guarantees into the Node engine: Git/config preflight, repository-contained paths, exact claim scopes, and authoritative command/config metadata.
+- Replaced global counters in new TRI workspaces with decentralized random task, ADR, decision, blocker, and assumption IDs while preserving legacy numeric readers and sequential adapter mode.
+- Added exact remote claim refs (`refs/heads/tri/claims/<ID>`), engine-owned ADR/register creation, atomic state writes, and scope verification against worker commits.
+- Made standard/strict completion require successful structured evidence. Evidence records engine/runtime context and output hashes rather than raw output; strict enforces required checks and expected environment.
+- Replaced passive run modes with dynamic leasing: automatic declared-safe concurrency, requested/actual mode, worker assignments, dependency release, isolated `tri-worker` worktrees, and gated integration commits.
+- Expanded visualization with a native dependency graph alongside the phase board, worker display, topology-based ordering, and mixed legacy/random ID support.
+- Added v3 regression coverage and minimum/current Node CI; fixed Withdrawn work appearing on the critical path and stale method documentation referencing removed commands.
+
 ## 2.5.0 — 2026-08-06
 
 - `/tri:run` and `/tri:ship` now choose an execution model — sequential, parallel subagents, or a team of agents — recommended by batch shape instead of a one-line heuristic: sequential for ≤ 3 tasks, chains deeper than 2, or overlapping files; parallel subagents for ≥ 4 file-disjoint tasks; a team (Claude Code only, experimental) for ≥ 8 substantial disjoint tasks, degrading to parallel subagents anywhere else.

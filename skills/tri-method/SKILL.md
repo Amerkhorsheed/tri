@@ -38,7 +38,7 @@ When a command needs a decision from the user, **present it with the structured 
 
 ## Preflight — before any command changes anything
 
-Nine commands write to the repository: `next`, `ship`, `run`, `done`, `clarify`, `grill`, `decide`, `adr`, `plan`, `init`. Each runs the tier below that matches what it is about to change. `status`, `visualize`, and the read phase of `go` change nothing and skip this.
+TRI v3 requires Git after `init`. The engine metadata (`tri.mjs meta`) is authoritative for which commands mutate state and which preflight they require. Prompt commands may orchestrate Git, but engine commands refuse detached/conflicted state, unsafe branch starts, malformed configuration, and dirty tracked state when beginning new work. `status`, `graph`, `next`, and `meta` are read-only; visualization writes only ignored `.tri/` scratch state.
 
 ### Tier 1 — every mutating command
 
@@ -57,22 +57,9 @@ git rev-parse --git-dir && git status --porcelain=v1 --branch && git branch --sh
 | `branch-pr` and on an unrelated task's branch | Say so; branch from the default branch instead. Stacking unrelated work makes that PR unreviewable |
 | `trunk` workflow | Dirty and mid-operation checks still apply; branch checks do not |
 
-### Tier 2 — commands that allocate a shared identifier
+### Tier 2 — commands that create identity-bearing records
 
-`decide` (D-/B- numbers), `adr` (ADR numbers), `plan` and `new-task` (task ids), and `clarify`/`grill` when they write register entries.
-
-```
-git fetch --quiet && git log --oneline HEAD..@{upstream}
-```
-
-Identifiers are allocated from what you can see. A stale ref means allocating a number someone else already used — the failure is silent locally and only surfaces at merge.
-
-| Condition | Action |
-|---|---|
-| Default branch has moved | Pull or rebase **before** allocating; re-read the register afterwards |
-| Local and remote diverged | **Stop.** Resolve the divergence first |
-| No remote configured | Proceed and say that identifier collision cannot be detected |
-| Remote unreachable | Warn, name the risk (a duplicate D-, ADR, or task id), and let the user decide whether to proceed |
+Tasks, ADRs, decisions, blockers, and assumptions are created through engine commands. TRI-native v3 workspaces use decentralized random IDs, so concurrent branches do not coordinate on a global counter. Legacy numeric IDs remain readable; adapted workspaces may explicitly retain `idStrategy: "sequential"`, in which case remote sync remains mandatory and fails closed.
 
 ### Tier 3 — commands that claim work
 
@@ -84,9 +71,9 @@ git ls-remote --heads origin
 
 | Condition | Action |
 |---|---|
-| A remote branch is named for this task id | It is already claimed. **Stop** and report who, unless the user explicitly takes it over |
-| A pushed `run/*` or `ship/*` branch covers this scope | Same — its first commit claims the whole queue |
-| Local work branch exists but is unpushed | The claim is invisible to everyone else. Push it before working |
+| Exact `refs/heads/tri/claims/<ID>` exists | It is already claimed. **Stop** unless explicitly released |
+| Claim ref is absent | Atomically push it before `claim`; check-then-push is not a lock |
+| Local work branch exists but is unpushed | The work is invisible. Push and verify before review |
 | Task status differs between your ref and the default branch | Trust the default branch; status on an unmerged branch is a proposal |
 
 - Push the claim commit immediately. A claim that only exists locally protects nobody. After every claim or task commit, verify the remote branch/ref equals the local commit; a failed push stops the workflow. After evidence completion, ask before opening a PR against the configured development base and ask separately before merging; never assume or merge silently.
@@ -98,20 +85,20 @@ One task → `<task-id-lowercase>-<slug>`. A ship run → `ship/<date>-<slug>`. 
 ## The loop
 
 1. `tri.mjs next` — ready tasks (dependencies Done, unclaimed).
-2. `tri.mjs claim T-NNNN --by <name>` — commit the claim immediately; the commit is the lock.
+2. Create a unique `claim-token <ID> --by <name>`, atomically push its token to its exact ref with an empty force-with-lease expectation, then `claim <ID> --by <name>`; the token ref is the distributed lock.
 3. Read the task file fully, plus its linked ADRs and context docs, before editing.
 4. Implement exactly that task. New work discovered → `tri.mjs new-task`, never scope-fold.
 5. Record assumptions in `tri/ASSUMPTIONS.md`; unresolved choices in `tri/DECISIONS.md` as blocking entries. **Never choose silently.**
-6. Fill the task's Evidence section (commands + observed results). Strict profile: also `tri/evidence/<ID>-<date>.md`.
-7. `tri.mjs validate` must pass, then `tri.mjs done T-NNNN`, commit, push, and verify the remote ref. Use `tri.mjs evidence T-NNNN -- <command>` when recording structured runtime context; `done` keeps legacy prose evidence compatible but warns when context is missing or mismatched.
+6. Run checks through `tri.mjs evidence <ID> --name <check> -- <command>` and summarize observed results in the task Evidence section. Raw output is not persisted; TRI stores status, byte count, hash, runtime, and engine version.
+7. `tri.mjs validate` must pass, then `tri.mjs done <ID>`, commit, push, and verify. Standard requires successful structured evidence; strict also enforces required check names and the declared environment. Legacy prose remains readable but does not satisfy v3 gates.
 
 ## Parallel work (dynamic claiming)
 
 Claiming is pull-based and dynamic: claim when you start, claim more when you finish, any dev any day. No pre-assigned ranges. Rules that keep it consistent:
 
-- A claim is real only once committed/pushed. Two devs claiming the same task = push conflict; first push wins, second runs `next` and picks another. Never treat a local commit as a remote claim.
+- A claim is real only when its exact remote ref contains a `claim-token` whose parent is the worker base. Create active claims with one atomic push and one empty `--force-with-lease=<ref>:` per token/ref; delete refs before release or after integration.
 - `release` on a task held by someone else requires `--force`, the same protection `claim` has. Pass `--by <name>` so the check can fire.
-- `new-task` allocates the next id from the **local tree plus remote reservations**. Run `tri.mjs sync` before allocating; it fetches remote branches and scans identifiers introduced outside configured default branch. Two developers creating a task from the same base are warned or rejected by `validate --remote`; resolve by keeping both entries and renumbering incoming entries to the next free identifier at resolution time, never a preselected target.
+- Random v3 IDs require no remote allocation scan. Legacy sequential adapters keep `sync` and remote collision validation until migrated.
 - Generated tasks start with `Specification status: Unrevised` and a TODO Objective. `next` flags them, `claim` warns, and batch runs warn unless explicitly passed `--allow-unrevised`; old tasks without the field default to `Specified`. `/tri:clarify` promotes a task to `Specified`, and only when the run actually edited its Objective and Acceptance criteria — the promotion is a claim the spec is written, never a ceremony. `Withdrawn` tasks remain recorded but never enter the frontier; dependencies on them produce warnings and do not block `done` or the frontier.
 - Cross-cutting files (API contracts, shared schemas) get changed in their own small PR reviewed by the other dev *before* dependent implementation. Everything else merges on green `validate` + project tests.
 - Registers (DECISIONS/ASSUMPTIONS) are append-only; merge conflicts resolve by keeping both entries.
@@ -124,14 +111,13 @@ The gate between specification and implementation is not optional. Specification
 
 ## Batch runs (/tri:run)
 
-Autonomous multi-task execution. Scope and execution model are chosen interactively at start — sequential, parallel subagents, or a team of agents — then the loop runs without human checkpoints; the gates are the brakes. State lives in `.tri/run.json` (local scratch, survives restarts) and is written **only** through the script: `run-state --start "<scope>" --mode <sequential|parallel|team> --queue <IDs>`, then `--done <ID>` / `--blocked <ID>` after each task, then `--finish`. Bare `run-state` prints what remains, which is how a killed session resumes. Never hand-edit the file. In `branch-pr` workflow a sequential run uses ONE run branch (`run/<date>-<scope>`, first commit claims the queue, pushed immediately) with one atomic commit per task and one PR per phase boundary — tasks stack, so intra-run dependency chains work; per-task branches from the default branch would silently drop the previous task's unmerged code. Parallel subagent runs keep per-task branches/PRs. Contract/shared-file tasks are extracted to their own PR for review while the run continues. Open PRs go in the final report; the frontier is read from the default branch only.
+Autonomous multi-task execution uses a host-neutral scheduler in `.tri/run.json`. Start with `--mode auto`; TRI computes maximal **declared-safe** concurrency from dependencies and exact `Expected files`, records requested versus actual mode, and leases work dynamically with `run-state --lease <worker>`. Missing or overlapping scopes serialize. The default capacity is four.
 
-**Execution models — choose by batch shape, not habit.** The three are different contracts, not one knob:
-- **Sequential** — one agent implements every task in order. Slowest, zero coordination cost; the default for ≤ 3 tasks, chains deeper than 2, or overlapping files.
-- **Parallel subagents** — isolated workers, no shared context, one per independent chain (not per task); orchestrator verifies every result against the gates before accepting `done`. For ≥ 4 ready, file-disjoint tasks. Works on any host agent.
-- **Team (Claude Code only, experimental)** — a leader + workers sharing plan and context; the leader can re-plan mid-run. For ≥ 8 substantial disjoint tasks where shared context or adaptive decomposition earns its coordination overhead. NOT parallel subagents: teams share context and adapt, subagents stay isolated. Outside Claude Code, degrade to parallel subagents with the same queue and gates. Teams never bypass the gates: the main thread still records state, re-runs `validate`, inspects Evidence, and accepts `done`.
+- **Sequential** — one lease at a time when no safe parallel frontier exists or explicitly requested.
+- **Parallel subagents** — isolated workers, one disposable Git worktree per independent chain. The orchestrator launches all leased workers together and keeps slots full as dependencies complete.
+- **Team (Claude Code)** — selected automatically for at least four related, declared-disjoint tasks when native teams are actually available. Teammates share coordination context but never a checkout.
 
-`run-state --start` refuses `Unrevised` queues unless the caller passes explicit `--allow-unrevised`; it also validates the mode and warns when a non-sequential mode queues tasks declaring overlapping `Expected files`. Batch mode is where a placeholder gets implemented at speed, so both guards stay hard.
+The orchestrator verifies ancestry, `verify-scope`, structured Evidence, project checks, and `validate` before cherry-picking each atomic worker commit onto one integration branch. Contract/shared-interface work remains a separate review PR. A backend fallback is always reported as the actual mode, never silently called parallel. `run-state --start` refuses Unrevised queues without explicit override.
 
 ## Branches and PRs
 
@@ -141,7 +127,7 @@ Autonomous multi-task execution. Scope and execution model are chosen interactiv
 
 **branch-pr:** one branch per task, named `<task-id-lowercase>-<slug>` (e.g. `task-0261-endpoint-enforcement`). Rules that keep claims and status truthful:
 
-- Before claiming, check remote branches (`git ls-remote --heads origin`): a branch named for the task ID is a claim, and a pushed `run/*` branch claims every task in its first (claim) commit.
+- Before claiming, atomically create the exact remote `refs/heads/tri/claims/<ID>` ref. Branch names are not ownership evidence.
 - The claim commit is the branch's first commit; push the branch immediately, verify the remote ref, and stop on push failure — the pushed branch is the visible lock.
 - `done` flips status inside the same branch; the PR merge lands the flip. **The frontier is only ever read from the default branch** — status on an unmerged branch is a proposal, not truth.
 - One task per branch per PR, no batching. Ask before opening or merging a PR into the configured development base; merge only on green `validate` + project tests, and changes touching contract/shared files wait for the other dev's review per the parallel-work rules.
@@ -158,9 +144,9 @@ Writing the registers is a **capability every command has**, not a step the user
 
 | Profile | Task template | Done gate |
 |---|---|---|
-| lite | ~8 fields | validate passes |
-| standard (default) | ~18 fields | + Evidence section non-empty |
-| strict | ~28 fields | + evidence record file in `tri/evidence/` |
+| lite | ~8 fields | validate and dependency state pass |
+| standard (default) | ~18 fields | + successful structured evidence and Evidence summary |
+| strict | ~28 fields | + every required check and expected environment match |
 
 Set at `tri.mjs init --profile <p>`; recorded in `tri.config.json`.
 

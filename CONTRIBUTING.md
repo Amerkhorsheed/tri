@@ -5,7 +5,7 @@ tri asks projects to keep a change and its companion files in one commit. This r
 ## Run before every commit
 
 ```bash
-node scripts/test-tri.mjs && node scripts/check-consistency.mjs
+node scripts/test-tri.mjs && node scripts/test-v3.mjs && node scripts/check-consistency.mjs
 ```
 
 Both must pass. The first proves behaviour; the second proves the change reached every artifact that describes it.
@@ -16,7 +16,7 @@ A change is not one file. Find the row that matches what you touched and move ev
 
 | You changed | Also update |
 |---|---|
-| `scripts/tri.mjs` behaviour | `scripts/test-tri.mjs` (test first, watch it fail), README if a flag or config key is user-facing, `CHANGELOG.md`, `plugin.json` version |
+| `scripts/tri.mjs` behaviour | `scripts/test-tri.mjs` or `scripts/test-v3.mjs` (test first, watch it fail), README if user-facing, `CHANGELOG.md`, `plugin.json` version |
 | A config option | README "Adopting an existing task tree", `docs/guide.html`, `templates/AGENTS-section.md` if an agent must know it, `CHANGELOG.md`, version |
 | Added a command | `commands/<name>.md`, README command table, `docs/guide.html` command table, `skills/tri-method/SKILL.md` if it changes the method, `CHANGELOG.md`, version |
 | Changed how commands behave | Every affected `commands/*.md`, `SKILL.md`, `docs/guide.html`, `CHANGELOG.md`, version |

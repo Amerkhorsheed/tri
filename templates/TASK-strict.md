@@ -58,7 +58,7 @@ Links with status respected, or N/A with reason.
 
 ## Expected files
 
-Smallest expected file set.
+N/A
 
 ## Functional requirements
 

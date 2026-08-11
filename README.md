@@ -2,7 +2,7 @@
 
 Delivery method plugin: **T**ask register + **R**egisters (decisions, assumptions, ADRs) + **I**ncrement evidence. Extracted from a production architecture workspace; in the family of GSD and spec-kit, with two differences: an append-only decision/assumption register ("never choose silently") and an evidence-gated definition of done.
 
-State is plain markdown under `tri/` in your project, merged through git. No server, no daemon. One zero-dependency Node script does all mechanics.
+State is plain markdown under `tri/` in your project, merged through git. No server, no daemon. One zero-dependency Node engine enforces mechanics; host adapters orchestrate workers and Git worktrees.
 
 ## Install
 
@@ -43,15 +43,15 @@ Full walkthrough with commands, batch runs, and profiles: [docs/guide.html](docs
 | `/tri:ship <area>` | Whole pipeline: scope → interview → write specs → one go-ahead → implement unattended |
 | `/tri:init [profile]` | Scaffold `tri/` workspace + `tri.config.json` + AGENTS.md section. Profiles: `lite`, `standard` (default), `strict` |
 | `/tri:plan <spec>` | Decompose a spec into tasks with real (not ceremonial) dependency edges |
-| `/tri:next [T-NNNN]` | Show ready tasks; claim and start one |
-| `/tri:done <T-NNNN>` | Evidence-gated completion |
+| `/tri:next [ID]` | Show ready tasks; claim and start one |
+| `/tri:done <ID>` | Structured-evidence-gated completion |
 | `/tri:status` | Counts, claims, ready frontier, critical path |
 | `/tri:adr <text>` | Write an ADR from the template |
-| `/tri:run [scope]` | Autonomous batch execution — asks scope and execution model once (sequential / parallel subagents / team, recommended by batch shape), then runs task after task through the gates without checkpoints; resumable via `.tri/run.json` |
+| `/tri:run [scope]` | Automatic declared-safe scheduling across sequential workers, parallel subagents, or native teams; dynamically leased and resumable via `.tri/run.json` |
 | `/tri:clarify [target]` | Interrogate and refine what is unclear — a task, a phase, or a decision you doubt. Batches questions for specs, goes one at a time for decisions. Writes results into files and registers |
 | `/tri:visualize [target]` | Interactive HTML board (phase lanes, dependencies, critical path) written to gitignored `.tri/`, opened for discussion |
 | `/tri:sync` | Fetch remote branches and reserve task/register identifiers allocated off default branch |
-| `/tri:evidence <T-NNNN> -- command` | Capture command output plus structured runtime context |
+| `/tri:evidence <ID> --name <check> -- command` | Capture status, output hash, engine/runtime context, and check identity |
 | `/tri:companions --check` | Check configured companion files and invoke maintenance hook |
 | `/tri:doctor` | Warn on governing-document drift and remote identifier collisions |
 | `/tri:rebaseline` | Drive ordered charter-to-task re-baseline layers |
@@ -59,7 +59,7 @@ Full walkthrough with commands, batch runs, and profiles: [docs/guide.html](docs
 Direct script use (what agents and CI run):
 
 ```bash
-node scripts/tri.mjs <init|new-task|validate|next|claim|release|done|status|graph|visualize|run-state|sync|evidence|companions|doctor|rebaseline>
+node scripts/tri.mjs <init|new-task|new-adr|register|validate|next|claim|claim-token|release|done|status|graph|visualize|run-state|verify-scope|claim-ref|sync|evidence|companions|doctor|rebaseline|meta>
 ```
 
 ## Branch and PR workflows
@@ -68,11 +68,11 @@ node scripts/tri.mjs <init|new-task|validate|next|claim|release|done|status|grap
 
 ## Batch execution vs the gates
 
-Like GSD's execute-phase or spec-kit's implement, `/tri:run` chews through many tasks in one go. In branch-pr workflow a sequential run uses one run branch with an atomic commit per task and one PR per phase boundary (per-task PRs would break intra-run dependency chains — the next task needs the previous one's unmerged code); parallel subagent runs keep per-task PRs; contract-touching tasks get extracted to their own PR for review. The execution model is chosen at start and recommended by batch shape: sequential for small batches or overlapping files, parallel subagents for ≥ 4 file-disjoint tasks, and a team of agents (Claude Code only) for large disjoint batches — teams share context and can re-plan mid-run; subagents stay isolated; on hosts without teams, degrade to parallel subagents. The loop's safety is mechanical, not vigilance-based: a task can't pass `done` with empty Evidence, `validate` failure halts the run, a missing owner decision becomes a Blocked task plus register entry while the run continues elsewhere, and `run-state --start` rejects unknown modes and warns when a non-sequential mode queues tasks declaring overlapping Expected files. Speed comes from never pausing between good tasks; safety from being unable to coast past a bad one.
+`/tri:run` chooses maximal declared-safe parallelism automatically. The scheduler combines dependency readiness with exact `Expected files`, leases independent chains up to capacity four, and records requested versus actual mode. Parallel workers run in isolated Git worktrees; Claude Code uses the bundled `tri-worker` subagent, and native teams are selected for at least four related, scope-disjoint tasks when available. Missing or overlapping scopes serialize rather than becoming merge conflicts. Each worker commit must pass `verify-scope`, structured evidence, project checks, and `validate` before the orchestrator cherry-picks it onto one integration branch. Contract/shared-interface changes remain separate review PRs. No host may silently report a sequential fallback as parallel.
 
 ## Parallel developers
 
-Claiming is **dynamic and pull-based** — no pre-assigned ranges. Claim when you start, claim more when you finish; a fast day means more claims, and adding tasks mid-flight is normal (`new-task`). Every claim also writes `.tri/claims/<task-id>.json` with owner, primary/covered/may-cover tasks, responsibilities, and related ADRs. TRI refuses exact scope overlap and never treats branch names as ownership evidence. A pushed manifest plus verified remote ref is the visible branch-pr claim; missing or malformed scope fails closed. Consistency comes from git: simultaneous claims resolve at push (first wins, second picks the next ready task). Dependency warnings on claims are advisory — the tool never blocks a split you chose deliberately.
+Claiming is **dynamic and pull-based**. An active task owns the exact remote ref `refs/heads/tri/claims/<task-id>`. `claim-token` creates a unique same-base Git object; pushing it with an empty `--force-with-lease` expectation means competing creation cannot both succeed. Branch names are never ownership evidence. Local manifests record owner and exact write files/directories (directories end in `/`; globs are rejected), and TRI refuses ancestor/exact overlap. Batch runs claim only work becoming active, not the whole future queue.
 
 ## Commands continue, they don't hand off
 
@@ -82,24 +82,18 @@ Writing decision and assumption entries is a capability every command has, not s
 
 ## Before work starts
 
-Every command that writes to the repository runs a preflight matched to what it changes:
-
-- **Tier 1, all of them** — stop on a dirty worktree, a rebase or merge in progress, or a detached HEAD; under `branch-pr`, cut the work branch from the default branch before the first commit and never commit onto an unrelated task's branch.
-- **Tier 2, anything allocating a shared identifier** (a decision number, an ADR number, a task id) — `git fetch` first. An identifier chosen from a stale ref may already be taken, and the collision is invisible until merge.
-- **Tier 3, anything claiming work** — `git ls-remote --heads origin`. A branch named for the task is a claim; a pushed `run/*` or `ship/*` branch claims its whole queue.
-
-This is what keeps two features out of one branch, specifications and code off the default branch, and two developers from allocating the same number.
+TRI v3 requires Git after `init`. Engine preflight refuses malformed config, detached/conflicted state, dirty tracked state when starting new work, and starting `branch-pr` work on the default branch. New TRI-native workspaces use decentralized random task/ADR/register IDs, removing global-counter races; existing numeric IDs remain readable and foreign workspaces can explicitly retain sequential allocation. Branch-PR claims require exact remote claim refs. `tri.mjs meta` exposes the authoritative command/config contract used by consistency checks.
 
 ## Batch state and recovery
 
-`run-state` is the mechanical record of a batch: `--start` with a scope, execution model (`sequential|parallel|team`) and queue; `--done`/`--blocked` after each task; `--finish` at the end. Bare `run-state` prints what remains, so a session killed mid-batch resumes exactly where it stopped rather than relying on the agent having remembered. The file lives in gitignored `.tri/` and is never hand-edited.
+`run-state` is the mechanical scheduler record: `--start` with scope/mode/queue, `--lease <worker>` for dynamic assignments, `--done`/`--blocked`, and `--finish`. It records capacity, actual mode, active workers, assignments, and timing. Bare or `--json` state resumes a killed session. `init` automatically ignores `.tri/`; the state is never hand-edited.
 
 ## Profiles
 
 | | lite | standard | strict |
 |---|---|---|---|
 | Task fields | ~8 | ~18 | ~28 |
-| Done gate | `validate` passes | + Evidence section filled | + evidence record file in `tri/evidence/` |
+| Done gate | valid state/dependencies | + successful structured evidence and summary | + required checks and environment match |
 
 ## Adopting an existing task tree
 
@@ -107,8 +101,10 @@ tri reads foreign task formats through config instead of rewriting files. Exampl
 
 ```json
 {
+  "version": 2,
   "profile": "strict",
   "taskDir": "tasks",
+  "idStrategy": "sequential",
   "idPrefix": "TASK-",
   "idWidth": 4,
   "statuses": ["Planned", "Ready", "Blocked", "In Progress", "Done"],
@@ -121,6 +117,7 @@ tri reads foreign task formats through config instead of rewriting files. Exampl
   "decisionFiles": ["tri/DECISIONS.md", "tri/ASSUMPTIONS.md"],
   "runtimeProbes": [["php", "--version"]],
   "expectedEnvironment": {"node": "v24"},
+  "requiredChecks": ["test", "lint"],
   "requireRemoteReservations": true,
   "claimScope": {"directory": ".tri/claims", "responsibilities": ["admin"]},
   "defaultBranch": "main",
@@ -128,7 +125,7 @@ tri reads foreign task formats through config instead of rewriting files. Exampl
 }
 ```
 
-`taskTemplate` makes `new-task` write the project's own template and fails if required sections are missing; TRI preserves template-owned fields and only replaces Phase/Dependencies when corresponding CLI options are supplied. `companionFiles` remains a legacy check-only list; `companions` supports path checks with strategy `check`, while unsupported strategies must use hooks. `companionHooks` uses argv arrays after `new-task`, `done`, `validate`, or `companions --check`. `runtimeProbes` and `expectedEnvironment` make evidence show declared runtime context; malformed probes and failed probes stop evidence capture. `sync` fetches remote branches and reserves identifiers not yet on the default branch; configured remote reservation failures stop allocation. `doctor` reports dangling ADR references and remote collisions as warnings. `Withdrawn` remains in registers but never enters frontier. `Specification status` defaults old tasks to `Specified`; generated tasks start `Unrevised`.
+`taskTemplate` makes `new-task` use the project's template and fail on missing required sections. `idStrategy` is `random` for TRI-native v3 workspaces; `sequential` preserves foreign numeric validators and legacy remote reservation checks. Unknown config keys fail unless namespaced `x-*`; writable paths must stay inside the repository. `requiredChecks`, runtime probes, and expected environment drive structured evidence gates. Evidence stores command metadata, status, output byte count/hash, runtime, and TRI version—not raw output. Companion hooks, doctor, Withdrawn, and Unrevised lifecycle support remain available.
 
 When creating a task, `--phase NN` targets `phase-NN`. If an existing task tree has exactly one suffixed directory such as `phase-12-mobile`, tri reuses it; `--phase NN-label` targets that exact label. Multiple suffixed matches, or a canonical directory alongside a suffixed match, fail instead of choosing silently. A phase with no match gets the canonical `phase-NN` directory.
 
@@ -137,9 +134,9 @@ Drop that in as `tri.config.json` and every command works against the existing t
 ## Tests and consistency
 
 ```bash
-node scripts/test-tri.mjs && node scripts/check-consistency.mjs
+node scripts/test-tri.mjs && node scripts/test-v3.mjs && node scripts/check-consistency.mjs
 ```
 
 The consistency check fails when a change reaches one artifact but not its companions — an undocumented command or config key, a version without a changelog entry, a stale test count, a broken link. See [CONTRIBUTING.md](CONTRIBUTING.md) for what must move together.
 
-63 behavioral tests covering init, ID allocation, validation defects (missing deps, bad status, duplicate IDs, cycles), frontier computation, claim/release/force, evidence gates per profile, Withdrawn and Unrevised lifecycle behavior, phase directory compatibility and conflict refusal, graph metrics, remote reservation failures/collisions, canonical doctor checks, the post-2.1.0 hardening regressions, and execution-model mode validation with Expected-files overlap warnings.
+75 behavioral tests cover legacy adapters plus v3 decentralized IDs, engine-owned ADR/register creation, config containment, structured evidence privacy, exact claims, dynamic concurrent leasing, Withdrawn graph semantics, and board/graph visualization.

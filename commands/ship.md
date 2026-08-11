@@ -6,9 +6,7 @@ Load the tri-method skill first. This command runs four stages in order. Stages 
 
 ## Stage 0 — Preflight
 
-Run the **tier 1, 2 and 3** preflight from the tri-method skill: worktree and branch state (stop on a dirty tree, a rebase or merge in progress, or a detached HEAD), `git fetch` so the scope is judged against the current default branch and any identifier this run allocates is not already taken, and `git ls-remote --heads origin` so no task in scope is already claimed by someone's pushed branch.
-
-In `branch-pr` workflow, **create the run branch now** — `ship/<date>-<slug>` from the default branch — so that neither the specification commit nor any implementation commit can land on the default branch. **Push it immediately and verify the remote ref**: a failed push stops the workflow; the pushed branch is the claim on this scope.
+Run tier 1–3 engine preflight. In `branch-pr`, create and push `ship/<date>-<slug>` from the configured default branch. Do not treat that branch as a task claim: active tasks receive exact `refs/heads/tri/claims/<ID>` refs atomically when execution starts.
 
 ## Stage 1 — Scope
 
@@ -54,9 +52,7 @@ Do not proceed without an explicit answer. This is the only pause; make it count
 
 ## Stage 4 — Implement
 
-Hand off to the `/tri:run` loop with the queue from stage 3, and follow its rules exactly: ask the scope-and-execution-model question once — sequential, parallel subagents, or a team of agents (Claude Code only) — recommending by batch shape (sequential for ≤ 3 tasks, chains deeper than 2, or overlapping files; parallel subagents for ≥ 4 disjoint tasks; team only for ≥ 8 substantial disjoint tasks), then record the queue with `run-state --start`, then run task after task — claim, implement, test, evidence, `validate`, `done`, commit — **with no further questions**. A task needing an owner decision gets its `B-` entry and is parked while the run continues. Halt only on a red gate after a real fix attempt, or when nothing runnable remains.
-
-Stay on the stage-0 branch: implementation commits stack on top of the specification commit, one atomic commit per task, and the PR at the end (or per phase boundary) carries both. Parallel subagent runs still use per-task branches, since simultaneous workers cannot share one.
+Hand the queue to `/tri:run` in automatic mode. Exact Expected files determine concurrency; missing scopes get a read-only planning pass or serialize. TRI dynamically leases independent chains to isolated `tri-worker` worktrees or a native Claude team, keeps capacity full, verifies scope/evidence/tests, and cherry-picks accepted atomic commits onto the stage-0 integration branch. Owner decisions become engine-created B- entries and park only their task. Halt on a red gate after a real fix attempt or when nothing runnable remains.
 
 ## Finish
 
