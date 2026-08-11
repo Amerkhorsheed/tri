@@ -1,0 +1,2 @@
+description = "Complete a TRI task through evidence gates"
+prompt = "Load the tri-method skill. Read ~/.tri/commands/done.md fully and execute it with arguments: {{args}}"

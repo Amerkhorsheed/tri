@@ -1,0 +1,2 @@
+description = "Show or start the next ready TRI task"
+prompt = "Load the tri-method skill. Read ~/.tri/commands/next.md fully and execute it with arguments: {{args}}"

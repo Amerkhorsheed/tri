@@ -1,0 +1,2 @@
+description = "Specify and deliver a feature area"
+prompt = "Load the tri-method skill. Read ~/.tri/commands/ship.md fully and execute it with arguments: {{args}}"

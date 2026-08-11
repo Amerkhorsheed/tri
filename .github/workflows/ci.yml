@@ -18,4 +18,5 @@ jobs:
       - run: node --check scripts/tri.mjs
       - run: node scripts/test-tri.mjs
       - run: node scripts/test-v3.mjs
+      - run: node scripts/test-adapters.mjs
       - run: node scripts/check-consistency.mjs

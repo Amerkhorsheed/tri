@@ -1,0 +1,2 @@
+description = "Show TRI workspace status and critical path"
+prompt = "Load the tri-method skill. Read ~/.tri/commands/status.md fully and execute it with arguments: {{args}}"

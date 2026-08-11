@@ -23,7 +23,27 @@ claude plugin install tri@tri
 
 The `~/.tri` clone is the shared convention: project docs and AGENTS.md sections reference `node ~/.tri/scripts/tri.mjs`, so every developer and CI job resolves the same path. Update with `git -C ~/.tri pull`.
 
-Codex / any other agent: works through the project's `AGENTS.md` — `/tri:init` appends a "TRI Method" section that instructs any agent to follow the same loop and run the same script from `~/.tri`. No Claude-specific machinery required.
+Codex — install the native plugin and worker profile:
+
+```bash
+codex plugin marketplace add Amerkhorsheed/tri
+codex plugin add tri@tri
+~/.tri/scripts/install-codex-agent.sh
+```
+
+Pi — install the package (skill, `/tri:*` commands, selectable questions, and cancellable parallel worker tool):
+
+```bash
+pi install git:github.com/Amerkhorsheed/tri@v3.1.0
+```
+
+Gemini CLI — install the extension, which bundles commands, the skill, and `tri-worker`. Native subagents are experimental and must be enabled with `{"experimental":{"enableAgents":true}}` in Gemini settings:
+
+```bash
+gemini extensions install https://github.com/Amerkhorsheed/tri
+```
+
+Antigravity reads the same `AGENTS.md`/Agent Skills surfaces. Its current adapter deliberately reports sequential because no programmable worker interface has been verified; it never labels that fallback parallel. Generic agents continue to work through the project's `AGENTS.md` section and the same engine.
 
 **Per project:** new project → `/tri:init [profile]`. Existing task tree → write a `tri.config.json` adapter (see "Adopting an existing task tree") and add the AGENTS.md section by hand or via init.
 
@@ -33,7 +53,7 @@ Codex / any other agent: works through the project's `AGENTS.md` — `/tri:init`
 
 ![Parallel work and dynamic claims](docs/tri-team.svg)
 
-Full walkthrough with commands, batch runs, and profiles: [docs/guide.html](docs/guide.html) (self-contained — open in any browser).
+Full walkthrough with commands, batch runs, and profiles: [docs/guide.html](docs/guide.html) (self-contained — open in any browser). Host capability and worker-launch guarantees: [docs/host-adapters.md](docs/host-adapters.md).
 
 ## Commands
 
@@ -60,6 +80,7 @@ Direct script use (what agents and CI run):
 
 ```bash
 node scripts/tri.mjs <init|new-task|new-adr|register|validate|next|claim|claim-token|release|done|status|graph|visualize|run-state|verify-scope|claim-ref|sync|evidence|companions|doctor|rebaseline|meta>
+node scripts/tri-host.mjs [claude|codex|pi|gemini|antigravity|generic] --json
 ```
 
 ## Branch and PR workflows
@@ -68,7 +89,7 @@ node scripts/tri.mjs <init|new-task|new-adr|register|validate|next|claim|claim-t
 
 ## Batch execution vs the gates
 
-`/tri:run` chooses maximal declared-safe parallelism automatically. The scheduler combines dependency readiness with exact `Expected files`, leases independent chains up to capacity four, and records requested versus actual mode. Parallel workers run in isolated Git worktrees; Claude Code uses the bundled `tri-worker` subagent, and native teams are selected for at least four related, scope-disjoint tasks when available. Missing or overlapping scopes serialize rather than becoming merge conflicts. Each worker commit must pass `verify-scope`, structured evidence, project checks, and `validate` before the orchestrator cherry-picks it onto one integration branch. Contract/shared-interface changes remain separate review PRs. No host may silently report a sequential fallback as parallel.
+`/tri:run` chooses maximal declared-safe parallelism automatically. `tri-host.mjs` declares the host capability, and the scheduler combines it with dependency readiness and exact `Expected files`, leases independent chains up to capacity four, and records adapter, backend, requested mode, and actual mode. Claude uses `tri-worker` Agents/teams, Codex uses native `spawn_agent`, Pi uses cancellable child processes, and Gemini uses its bundled experimental subagent. Every worker runs in a distinct Git worktree. Missing or overlapping scopes serialize rather than becoming merge conflicts. Each worker commit must pass `verify-scope`, structured evidence, project checks, and `validate` before the orchestrator cherry-picks it onto one integration branch. Contract/shared-interface changes remain separate review PRs. Antigravity and unknown hosts currently fail safe to sequential; no host may silently report a fallback as parallel.
 
 ## Parallel developers
 
@@ -86,7 +107,7 @@ TRI v3 requires Git after `init`. Engine preflight refuses malformed config, det
 
 ## Batch state and recovery
 
-`run-state` is the mechanical scheduler record: `--start` with scope/mode/queue, `--lease <worker>` for dynamic assignments, `--done`/`--blocked`, and `--finish`. It records capacity, actual mode, active workers, assignments, and timing. Bare or `--json` state resumes a killed session. `init` automatically ignores `.tri/`; the state is never hand-edited.
+`run-state` is the mechanical scheduler record: `--start` with scope/mode/queue/`--adapter`, `--lease <worker>` for dynamic assignments, `--done`/`--blocked`, and `--finish`. It records host adapter, worker backend, capacity, actual mode, active workers, assignments, and timing. Bare or `--json` state resumes a killed session. `init` automatically ignores `.tri/`; the state is never hand-edited.
 
 ## Profiles
 
@@ -134,9 +155,9 @@ Drop that in as `tri.config.json` and every command works against the existing t
 ## Tests and consistency
 
 ```bash
-node scripts/test-tri.mjs && node scripts/test-v3.mjs && node scripts/check-consistency.mjs
+node scripts/test-tri.mjs && node scripts/test-v3.mjs && node scripts/test-adapters.mjs && node scripts/check-consistency.mjs
 ```
 
 The consistency check fails when a change reaches one artifact but not its companions — an undocumented command or config key, a version without a changelog entry, a stale test count, a broken link. See [CONTRIBUTING.md](CONTRIBUTING.md) for what must move together.
 
-75 behavioral tests cover legacy adapters plus v3 decentralized IDs, engine-owned ADR/register creation, config containment, structured evidence privacy, exact claims, dynamic concurrent leasing, Withdrawn graph semantics, and board/graph visualization.
+79 behavioral tests cover legacy adapters plus v3 decentralized IDs, engine-owned ADR/register creation, config containment, structured evidence privacy, exact claims, dynamic concurrent leasing, host capability fallbacks, real overlapping worker processes, native package surfaces, Withdrawn graph semantics, and board/graph visualization.

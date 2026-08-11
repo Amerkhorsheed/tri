@@ -60,13 +60,16 @@ const configKeys = meta.configKeys;
 for (const key of configKeys) check(readme.includes(key), `README.md does not document the "${key}" config option`);
 for (const command of Object.keys(meta.commands)) check(readme.includes(command), `README.md does not name engine command "${command}"`);
 
-// --- 4. the version has a changelog entry ---
+// --- 4. every host package has the same released version and a changelog entry ---
 const version = JSON.parse(read('.claude-plugin/plugin.json')).version;
+for (const file of ['.codex-plugin/plugin.json', 'gemini-extension.json', 'package.json']) {
+  check(JSON.parse(read(file)).version === version, `${file} version differs from Claude plugin ${version}`);
+}
 check(read('CHANGELOG.md').includes(`## ${version}`), `CHANGELOG.md has no section for version ${version}`);
 
 // --- 5. claimed test count matches reality ---
-const testFiles = ['scripts/test-tri.mjs', 'scripts/test-v3.mjs'];
-const actualTests = testFiles.reduce((count, file) => count + (read(file).match(/^check\(/gm) ?? []).length, 0);
+const testFiles = ['scripts/test-tri.mjs', 'scripts/test-v3.mjs', 'scripts/test-adapters.mjs'];
+const actualTests = testFiles.reduce((count, file) => count + (read(file).match(/^(?:await )?check\(/gm) ?? []).length, 0);
 const claimed = readme.match(/(\d+) behavioral tests/);
 check(claimed, 'README.md makes no test-count claim');
 if (claimed) {
@@ -81,7 +84,15 @@ for (const f of ['DECISIONS', 'ASSUMPTIONS']) {
   check(agentsSection.includes(f), `templates/AGENTS-section.md never mentions ${f}`);
 }
 
-// --- 7. referenced files exist ---
+// --- 7. native command adapters and package workers are complete ---
+for (const cmd of commands) {
+  check(existsSync(join(ROOT, 'commands', `${cmd}.toml`)), `commands/${cmd}.toml is missing for Codex/Gemini`);
+}
+check(read('agents/tri-worker.md').includes('kind: local'), 'Gemini tri-worker is not a local agent');
+check(read('agents/tri-worker.toml').includes('name = "tri_worker"'), 'Codex tri_worker profile is missing');
+check(read('package.json').includes('extensions/pi/index.ts'), 'Pi package does not expose its extension');
+
+// --- 8. referenced files exist ---
 for (const m of readme.matchAll(/\]\((docs\/[^)]+|scripts\/[^)]+)\)/g)) {
   check(existsSync(join(ROOT, m[1])), `README.md links a missing file: ${m[1]}`);
 }

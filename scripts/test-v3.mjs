@@ -77,7 +77,7 @@ check('evidence stores hashes and TRI version, not raw output', () => {
   writeFileSync(join(ws, 'emit-secret.mjs'), 'console.log("secret-output")\n');
   run(ws, ['evidence', id, '--name', 'suite', '--', 'node', 'emit-secret.mjs', '-H', 'X-API-Key: release-blocker-secret', '--cookie', 'session=cookie-secret']);
   const record = readdirSync(join(ws, 'tri/evidence')).map((name) => readFileSync(join(ws, 'tri/evidence', name), 'utf8')).join('\n');
-  includes(record, 'outputSha256'); includes(record, '"tri": "3.0.0"');
+  includes(record, 'outputSha256'); includes(record, '"tri": "3.1.0"');
   assert(!record.includes('secret-output'), 'raw command output persisted');
   assert(!record.includes('release-blocker-secret'), 'API key header persisted');
   assert(!record.includes('cookie-secret'), 'authentication cookie persisted');
@@ -110,7 +110,7 @@ check('scheduler leases safe work concurrently and respects dependencies', () =>
   writeFileSync(join(dir, 'T-0001.md'), task('T-0001', 'N/A', 'src/a.js'));
   writeFileSync(join(dir, 'T-0002.md'), task('T-0002', '- T-0001', 'src/b.js'));
   writeFileSync(join(dir, 'T-0003.md'), task('T-0003', '- T-0001', 'src/c.js'));
-  includes(run(w, ['run-state', '--start', 'v3', '--mode', 'auto', '--queue', 'T-0001,T-0002,T-0003']), 'actual parallel');
+  includes(run(w, ['run-state', '--start', 'v3', '--mode', 'auto', '--adapter', 'pi', '--queue', 'T-0001,T-0002,T-0003']), 'actual parallel');
   const [first, waiting] = JSON.parse(run(w, ['run-state', '--lease', 'worker-1,worker-2']));
   assert(first.task === 'T-0001' && waiting.task === null, `unexpected root leases: ${JSON.stringify([first, waiting])}`);
   includes(run(w, ['run-state', '--done', 'T-0001'], true), 'status is Done');
@@ -178,8 +178,8 @@ check('visualization contains board and dependency graph views', () => {
 
 check('metadata exposes the authoritative engine contract', () => {
   const meta = JSON.parse(run(ws, ['meta']));
-  assert(meta.version === '3.0.0', 'wrong metadata version');
-  assert(meta.commands['verify-scope'] && meta.configKeys.includes('idStrategy'), 'metadata incomplete');
+  assert(meta.version === '3.1.0', 'wrong metadata version');
+  assert(meta.commands['verify-scope'] && meta.configKeys.includes('idStrategy') && meta.hostAdapters.pi.backend === 'pi-workers', 'metadata incomplete');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

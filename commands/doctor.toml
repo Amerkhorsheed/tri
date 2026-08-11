@@ -1,0 +1,2 @@
+description = "Diagnose TRI workspace drift"
+prompt = "Load the tri-method skill. Read ~/.tri/commands/doctor.md fully and execute it with arguments: {{args}}"

@@ -1,0 +1,2 @@
+description = "Capture structured task evidence"
+prompt = "Load the tri-method skill. Read ~/.tri/commands/evidence.md fully and execute it with arguments: {{args}}"

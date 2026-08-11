@@ -111,13 +111,15 @@ The gate between specification and implementation is not optional. Specification
 
 ## Batch runs (/tri:run)
 
-Autonomous multi-task execution uses a host-neutral scheduler in `.tri/run.json`. Start with `--mode auto`; TRI computes maximal **declared-safe** concurrency from dependencies and exact `Expected files`, records requested versus actual mode, and leases work dynamically with `run-state --lease <worker>`. Missing or overlapping scopes serialize. The default capacity is four.
+Autonomous multi-task execution uses a host-neutral scheduler in `.tri/run.json`. Probe with `tri-host.mjs`, then start with `--mode auto` plus the probe's `runStateArgs`; TRI computes maximal **declared-safe** concurrency from dependencies and exact `Expected files`, records adapter/backend/requested/actual mode, and leases work dynamically with `run-state --lease <worker>`. Unknown hosts, Antigravity, and Gemini without explicitly enabled agents fail safe to sequential. Missing or overlapping scopes serialize. The default capacity is four.
 
-- **Sequential** — one lease at a time when no safe parallel frontier exists or explicitly requested.
-- **Parallel subagents** — isolated workers, one disposable Git worktree per independent chain. The orchestrator launches all leased workers together and keeps slots full as dependencies complete.
-- **Team (Claude Code)** — selected automatically for at least four related, declared-disjoint tasks when native teams are actually available. Teammates share coordination context but never a checkout.
+- **Sequential** — one lease at a time when the adapter cannot prove a parallel worker interface or no safe parallel frontier exists.
+- **Claude Code** — bundled `tri-worker` Agent calls; native teams only when explicitly available.
+- **Codex** — native stable multi-agent `spawn_agent` calls with the installed `tri_worker` profile.
+- **Pi** — the packaged `tri_workers` extension tool spawns cancellable child Pi processes concurrently in supplied worktrees.
+- **Gemini CLI** — bundled experimental `tri-worker` subagent; enable agents explicitly and remember that child tools run in YOLO mode.
 
-The orchestrator verifies ancestry, `verify-scope`, structured Evidence, project checks, and `validate` before cherry-picking each atomic worker commit onto one integration branch. Contract/shared-interface work remains a separate review PR. A backend fallback is always reported as the actual mode, never silently called parallel. `run-state --start` refuses Unrevised queues without explicit override.
+Every parallel worker receives one disposable Git worktree and exact paths. The orchestrator launches a leased batch together, keeps slots full, and alone owns leasing and integration. It verifies ancestry, `verify-scope`, structured Evidence, project checks, and `validate` before cherry-picking each atomic commit. Contract/shared-interface work remains a separate review PR. A backend fallback is always reported as the actual mode, never silently called parallel. `run-state --start` refuses Unrevised queues without explicit override.
 
 ## Branches and PRs
 

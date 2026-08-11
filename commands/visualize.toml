@@ -1,0 +1,2 @@
+description = "Generate the TRI board and dependency graph"
+prompt = "Load the tri-method skill. Read ~/.tri/commands/visualize.md fully and execute it with arguments: {{args}}"

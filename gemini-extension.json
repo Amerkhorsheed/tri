@@ -1,0 +1,6 @@
+{
+  "name": "tri",
+  "version": "3.1.0",
+  "description": "Evidence-gated delivery with safe task claims and native subagents.",
+  "contextFileName": "AGENTS.md"
+}
