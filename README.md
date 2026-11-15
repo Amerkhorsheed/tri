@@ -34,7 +34,7 @@ codex plugin add tri@tri
 Pi — install the package (skill, `/tri:*` commands, selectable questions, and cancellable parallel worker tool):
 
 ```bash
-pi install git:github.com/Amerkhorsheed/tri@v3.2.0
+pi install git:github.com/Amerkhorsheed/tri@v3.3.0
 ```
 
 Cursor — install the skill and `tri-worker` subagent (detects `CURSOR_AGENT=1` for parallel Task workers):
@@ -167,4 +167,4 @@ node scripts/test-tri.mjs && node scripts/test-v3.mjs && node scripts/test-adapt
 
 The consistency check fails when a change reaches one artifact but not its companions — an undocumented command or config key, a version without a changelog entry, a stale test count, a broken link. See [CONTRIBUTING.md](CONTRIBUTING.md) for what must move together.
 
-82 behavioral tests cover legacy adapters plus v3 decentralized IDs, engine-owned ADR/register creation, config containment, structured evidence privacy, exact claims, dynamic concurrent leasing, host capability fallbacks, real overlapping worker processes, native package surfaces, Cursor Task backend recording, Withdrawn graph semantics, and board/graph visualization.
+85 behavioral tests cover legacy adapters plus v3 decentralized IDs, engine-owned ADR/register creation, config containment, structured evidence privacy, exact claims, dynamic concurrent leasing, host capability fallbacks, real overlapping worker processes, native package surfaces, Cursor Task backend recording, Withdrawn graph semantics, self-pushing claim tokens, phase-label resolution, claim scopes left by other branches, and board/graph visualization.

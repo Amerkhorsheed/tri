@@ -33,7 +33,7 @@ const COMMAND_META = {
   'claim-ref': {}, 'claim-token': {}, meta: {},
 };
 const META = {
-  version: '3.2.0', profiles: PROFILES, statuses: STATUSES, specificationStatuses: SPECIFICATION_STATUSES,
+  version: '3.3.0', profiles: PROFILES, statuses: STATUSES, specificationStatuses: SPECIFICATION_STATUSES,
   runModes: RUN_MODES, hostAdapters: HOST_ADAPTERS, idStrategies: ID_STRATEGIES,
   configKeys: [...CONFIG_KEYS].sort(), commands: COMMAND_META,
 };
@@ -444,6 +444,26 @@ function listClaimManifests(cfg) {
   if (!existsSync(dir)) return [];
   return readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => join(dir, f)).sort();
 }
+// A claim scope written while another branch was checked out can name tasks that
+// do not exist in this tree (the task file lives only on that branch). It belongs
+// to that branch's work, not to this one: report it and leave it alone.
+function foreignClaimManifest(raw, tasks) {
+  const known = new Set(tasks.map((t) => t.id));
+  const primary = Array.isArray(raw?.primaryTasks) ? raw.primaryTasks : [];
+  return primary.length > 0 && primary.every((id) => !known.has(id));
+}
+function currentClaimManifests(cfg, tasks, warn) {
+  const result = [];
+  for (const file of listClaimManifests(cfg)) {
+    const raw = readClaimManifest(file);
+    if (foreignClaimManifest(raw, tasks)) {
+      warn(`claim scope ${relative(cfg.root, file)} names tasks not in this tree (${raw.primaryTasks.join(', ')}); it belongs to another branch and is ignored here`);
+      continue;
+    }
+    result.push({ file, raw });
+  }
+  return result;
+}
 function readClaimManifest(file) {
   let value;
   try { value = JSON.parse(readFileSync(file, 'utf8')); } catch (e) { fail(`claim scope ${file} is not valid JSON: ${e.message}`); }
@@ -511,9 +531,9 @@ function scopeConflicts(candidate, existing) {
 }
 function checkClaimScope(cfg, candidate, tasks, ignoreFile) {
   const manifests = [];
-  for (const file of listClaimManifests(cfg)) {
+  for (const { file, raw } of currentClaimManifests(cfg, tasks, (m) => out(`warning: ${m}`))) {
     if (file === ignoreFile) continue;
-    manifests.push({ file, scope: validateClaimScope(cfg, readClaimManifest(file), tasks, file) });
+    manifests.push({ file, scope: validateClaimScope(cfg, raw, tasks, file) });
   }
   const conflicts = manifests.flatMap(({ file, scope }) => scopeConflicts(candidate, scope).map((c) => `${file}: ${c}`));
   if (conflicts.length) fail(`claim scope overlap; resolve before claiming:\n${conflicts.join('\n')}`);
@@ -639,9 +659,10 @@ function resolvePhaseDir(cfg, phase) {
 }
 
 function replaceSectionText(text, name, value) {
+  // null means the section does not exist; an unchanged value is a success.
   const pattern = new RegExp(`(## ${name}\\n\\n)[\\s\\S]*?(?=\\n## |\\n?$)`);
-  const updated = text.replace(pattern, `$1${value.trim()}\n`);
-  return updated === text ? null : updated;
+  if (!pattern.test(text)) return null;
+  return text.replace(pattern, `$1${value.trim()}\n`);
 }
 
 function updateSections(task, values) {
@@ -964,6 +985,9 @@ function cmdNewTask(args) {
   const tasks = loadTasks(cfg);
   const id = nextId(cfg, cfg.idPrefix, tasks);
   const dir = resolvePhaseDir(cfg, phase);
+  // A numeric phase that resolved to a suffixed directory records the full label,
+  // so the task's Phase section matches the directory it lives in.
+  const phaseLabel = basename(dir).startsWith('phase-') ? basename(dir).slice('phase-'.length) : phase;
   mkdirSync(dir, { recursive: true });
   const depsBlock = deps.length ? deps.map((d) => `- ${d}`).join('\n') : 'N/A';
   let body;
@@ -975,7 +999,7 @@ function cmdNewTask(args) {
       .replace(new RegExp(`${cfg.idPrefix.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')}N+`, 'g'), id)
       .replaceAll('{{ID}}', id)
       .replaceAll('{{TITLE}}', title)
-      .replaceAll('{{PHASE}}', phase)
+      .replaceAll('{{PHASE}}', phaseLabel)
       .replaceAll('{{DEPS}}', depsBlock);
     if (!/^#\s+/.test(body)) body = `# ${id}: ${title}\n\n${body}`;
     else body = body.replace(/^#\s+.*$/m, `# ${id}: ${title}`);
@@ -983,7 +1007,7 @@ function cmdNewTask(args) {
     if (!body.includes('## Dependencies')) fail(`taskTemplate must contain a ## Dependencies section: ${cfg.taskTemplate}`);
     if (!body.includes('## Acceptance criteria')) fail(`taskTemplate must contain a ## Acceptance criteria section: ${cfg.taskTemplate}`);
     if (phaseArg !== undefined) {
-      const updated = replaceSectionText(body, 'Phase', phase);
+      const updated = replaceSectionText(body, 'Phase', phaseLabel);
       if (updated === null) fail(`taskTemplate must contain a ## Phase section when --phase is supplied: ${cfg.taskTemplate}`);
       body = updated;
     }
@@ -996,7 +1020,7 @@ function cmdNewTask(args) {
     body = readFileSync(join(TEMPLATES, `TASK-${cfg.profile}.md`), 'utf8')
       .replaceAll('{{ID}}', id)
       .replaceAll('{{TITLE}}', title)
-      .replaceAll('{{PHASE}}', phase)
+      .replaceAll('{{PHASE}}', phaseLabel)
       .replaceAll('{{DEPS}}', depsBlock);
     body = body.replace(/^## Objective\n\n.*?(?=\n## |\n?$)/ms, `## Objective\n\nTODO: state what is true after this task that was not true before.\n`);
     body = body.replace(/^## Specification status\n\n.*?(?=\n## |\n?$)/ms, '## Specification status\n\nUnrevised\n');
@@ -1035,10 +1059,8 @@ function cmdValidate(args = []) {
       if (unmet.length) warnings.push(`${t.id}: claimed by ${t.assignee} but dependencies not Done: ${unmet.join(', ')}`);
     }
   }
-  for (const file of listClaimManifests(cfg)) validateClaimScope(cfg, readClaimManifest(file), tasks, file);
-  const claimed = listClaimManifests(cfg);
-  for (const file of claimed) {
-    const scope = validateClaimScope(cfg, readClaimManifest(file), tasks, file);
+  for (const { file, raw } of currentClaimManifests(cfg, tasks, (m) => warnings.push(m))) {
+    const scope = validateClaimScope(cfg, raw, tasks, file);
     for (const path of scope.forbiddenPaths) if (scope.writePaths.some((p) => patternsOverlap(p, path))) fail(`claim scope ${file}: writePaths includes forbidden path ${path}`);
   }
   const inventory = cfg.idStrategy === 'sequential' || args.includes('--remote')
@@ -1597,7 +1619,21 @@ function cmdClaimToken(args) {
   const message = `TRI claim ${id}\nowner ${owner}\nnonce ${randomBytes(12).toString('hex')}\n`;
   const token = spawnSync('git', ['commit-tree', tree, '-p', head], { cwd: cfg.root, encoding: 'utf8', input: message });
   if (token.status !== 0 || token.error) fail(`cannot create claim token: ${(token.error?.message || token.stderr || 'git failed').trim()}`);
-  out(JSON.stringify({ id, ref: claimRef(id), token: token.stdout.trim(), base: head }));
+  const sha = token.stdout.trim();
+  const ref = claimRef(id);
+  if (!args.includes('--push')) { out(JSON.stringify({ id, ref, token: sha, base: head })); return; }
+  // --push does the atomic reservation itself, so no shell has to build a
+  // "<token>:<ref>" refspec (zsh, for one, reads "$TOKEN:r..." as a modifier).
+  const remote = cfg.remote ?? 'origin';
+  const push = git(['push', '--porcelain', `--force-with-lease=${ref}:`, remote, `${sha}:${ref}`], cfg.root, true);
+  if (push.status !== 0) {
+    const existing = git(['ls-remote', remote, ref], cfg.root, true).stdout.trim().split(/\s+/)[0];
+    if (existing) fail(`${id} is already claimed: ${ref} exists on ${remote} (${existing.slice(0, 12)}); do not take it over`);
+    fail(`cannot push claim ${ref} to ${remote}: ${(push.stderr || push.stdout || 'git failed').trim()}`);
+  }
+  const remoteSha = git(['ls-remote', remote, ref], cfg.root, true).stdout.trim().split(/\s+/)[0];
+  if (remoteSha !== sha) fail(`claim ${ref} on ${remote} is ${remoteSha || 'missing'}, expected ${sha}; the claim is not yours`);
+  out(JSON.stringify({ id, ref, token: sha, base: head, pushed: true, remote }));
 }
 
 function cmdSync() {
@@ -1962,7 +1998,7 @@ if (!cmd || !(cmd in commands)) {
   run-state [--start <scope> --queue <ID,..> [--mode m] [--adapter host]] [--done ID] [--blocked ID] [--finish]
   new-adr --title "..." | register --kind decision|blocker|assumption --text "..."
   sync | evidence ID [--name check] -- command [args...] | companions [--check] | doctor
-  claim-token ID --by owner | claim-ref ID | verify-scope ID --base commit
+  claim-token ID --by owner [--push] | claim-ref ID | verify-scope ID --base commit
   rebaseline [--approve|--complete] | meta`);
 }
 commands[cmd](args);

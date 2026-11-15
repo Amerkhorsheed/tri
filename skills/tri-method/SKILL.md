@@ -82,10 +82,14 @@ git ls-remote --heads origin
 
 One task → `<task-id-lowercase>-<slug>`. A ship run → `ship/<date>-<slug>`. A batch → `run/<date>-<scope>`.
 
+### One worktree per task
+
+Several sessions often share one machine and one clone. Do each task in its own Git worktree next to the clone (`git worktree add ../<repo>-<id-lowercase> -b <branch> <default-branch>`) instead of switching the shared checkout, and remove it with `git worktree remove` after integration. Never delete an untracked file or a `.tri/claims/` scope you did not create: another session's work may be in it. `validate` reports a claim scope whose tasks are not in the current tree as belonging to another branch and ignores it.
+
 ## The loop
 
 1. `tri.mjs next` — ready tasks (dependencies Done, unclaimed).
-2. Create a unique `claim-token <ID> --by <name>`, atomically push its token to its exact ref with an empty force-with-lease expectation, then `claim <ID> --by <name>`; the token ref is the distributed lock.
+2. Run `claim-token <ID> --by <name> --push`: it creates a unique token, atomically pushes it to its exact ref with an empty force-with-lease expectation and verifies the remote ref. Then `claim <ID> --by <name>`; the token ref is the distributed lock. Without `--push` the command only prints the token, and the push must quote the refspec (`"${TOKEN}:${REF}"`): zsh reads an unbraced `$TOKEN:r…` as a modifier.
 3. Read the task file fully, plus its linked ADRs and context docs, before editing.
 4. Implement exactly that task. New work discovered → `tri.mjs new-task`, never scope-fold.
 5. Record assumptions in `tri/ASSUMPTIONS.md`; unresolved choices in `tri/DECISIONS.md` as blocking entries. **Never choose silently.**
