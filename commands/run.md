@@ -25,10 +25,10 @@ node ~/.tri/scripts/tri.mjs run-state --start "<scope>" --mode auto --capacity 4
 
 Use an explicit host probe when auto-detection returns `generic`. Pass its `adapter` and optional team argument exactly. Cursor is detected from `CURSOR_AGENT=1` and prefers that signal over Claude-adjacent env vars. Gemini's bundled subagent is experimental: the probe selects `gemini-agents` only when settings prove it is enabled, otherwise it selects sequential `gemini`. Antigravity currently declares sequential because it has no verified programmable worker interface. Read the reported **adapter**, **backend**, and **actual** mode. Never describe a fallback as parallel.
 
-Lease the next worker batch, then create a unique token for each active task with `tri.mjs claim-token <ID> --by <worker>`. Atomically push each returned token to its returned ref with an empty lease expectation:
+Lease the next worker batch, then reserve each active task with `tri.mjs claim-token <ID> --by <worker> --push`, which pushes its unique token to its exact ref with an empty lease and verifies it. To reserve several tasks in one atomic push instead, create the tokens without `--push` and push them together with the refspecs quoted:
 
 ```bash
-git push --atomic --force-with-lease=<ref>: origin <token>:<ref> [...]
+git push --atomic "--force-with-lease=${REF}:" origin "${TOKEN}:${REF}" [...]
 ```
 
 Tokens have the integration HEAD as parent, so same-base contenders still produce different objects and only one empty-lease push wins. Claim only active work, not the future queue.

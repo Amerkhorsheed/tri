@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.3.0 — 2026-11-15
+
+- `claim-token <ID> --by <owner> --push` pushes the claim token to its exact ref with an empty lease and verifies the remote ref, so no shell builds the `<token>:<ref>` refspec. In zsh an unbraced `$TOKEN:refs/...` was read as a `:r` modifier and silently produced a wrong refspec. A taken claim fails with "already claimed".
+- `new-task --phase NN` no longer fails when the template's Phase value already equals NN, and a numeric phase that resolves to a suffixed directory (`phase-01-requirements-design`) records the full label in the task's Phase section.
+- `validate` and `claim` warn about and ignore a `.tri/claims/` scope whose tasks are not in the current tree; such a scope was written on another branch and used to make validation fail.
+- One worktree per task: `/tri:next`, `/tri:run` and the method skill tell agents to work in their own Git worktree instead of switching a checkout another session shares, and never to delete untracked files or claim scopes they did not create.
+- Install paths point to this repository.
+
 ## 3.2.0 — 2026-08-11
 
 - Added a first-class Cursor host adapter: `CURSOR_AGENT=1` detection, `cursor-task-tri-worker` parallel backend, and `scripts/install-cursor.sh` for the `tri-method` skill plus `~/.cursor/agents/tri-worker.md`.

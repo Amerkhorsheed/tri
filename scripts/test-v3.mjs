@@ -106,7 +106,7 @@ check('evidence stores hashes and TRI version, not raw output', () => {
   writeFileSync(join(ws, 'emit-secret.mjs'), 'console.log("secret-output")\n');
   run(ws, ['evidence', id, '--name', 'suite', '--', 'node', 'emit-secret.mjs', '-H', 'X-API-Key: release-blocker-secret', '--cookie', 'session=cookie-secret']);
   const record = readdirSync(join(ws, 'tri/evidence')).map((name) => readFileSync(join(ws, 'tri/evidence', name), 'utf8')).join('\n');
-  includes(record, 'outputSha256'); includes(record, '"tri": "3.2.0"');
+  includes(record, 'outputSha256'); includes(record, '"tri": "3.3.0"');
   assert(!record.includes('secret-output'), 'raw command output persisted');
   assert(!record.includes('release-blocker-secret'), 'API key header persisted');
   assert(!record.includes('cookie-secret'), 'authentication cookie persisted');
@@ -189,6 +189,42 @@ check('claim tokens make same-base remote reservation first-writer-wins', () => 
   includes(run(w, ['done', 'T-0001'], true), 'active remote claim token');
 });
 
+check('claim-token --push reserves the claim itself and refuses a second owner', () => {
+  const w = mkdtempSync(join(tmpdir(), 'tri-v3-push-')); ensureGit(w);
+  writeFileSync(join(w, 'tri.config.json'), JSON.stringify({ version: 2, profile: 'lite', taskDir: 'tri/tasks', idStrategy: 'random', workflow: 'branch-pr', defaultBranch: 'main' }));
+  const dir = join(w, 'tri/tasks/phase-01'); mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'T-0001.md'), task('T-0001'));
+  git(w, ['add', '.']); git(w, ['commit', '-m', 'baseline']);
+  const origin = mkdtempSync(join(tmpdir(), 'tri-v3-push-origin-')); git(origin, ['init', '--bare']);
+  git(w, ['remote', 'add', 'origin', origin]); git(w, ['push', 'origin', 'main']); git(w, ['checkout', '-b', 'work']);
+  const first = JSON.parse(run(w, ['claim-token', 'T-0001', '--by', 'a', '--push']));
+  assert(first.pushed === true, 'push not reported');
+  assert(git(w, ['ls-remote', 'origin', first.ref]).startsWith(first.token), 'remote ref is not the token');
+  includes(run(w, ['claim-token', 'T-0001', '--by', 'b', '--push'], true), 'already claimed');
+  includes(run(w, ['claim', 'T-0001', '--by', 'a']), 'claimed by a');
+});
+
+check('new-task --phase NN equal to the template value resolves the suffixed directory label', () => {
+  const w = mkdtempSync(join(tmpdir(), 'tri-v3-phase-')); ensureGit(w);
+  writeFileSync(join(w, 'tri.config.json'), JSON.stringify({ version: 2, profile: 'lite', taskDir: 'tasks', idStrategy: 'random', workflow: 'trunk', taskTemplate: 'tri/TASK-template.md' }));
+  mkdirSync(join(w, 'tri'), { recursive: true }); mkdirSync(join(w, 'tasks/phase-01-requirements'), { recursive: true });
+  writeFileSync(join(w, 'tri/TASK-template.md'), '# {{ID}}: {{TITLE}}\n\n## Status\n\nPlanned\n\n## Phase\n\n01\n\n## Dependencies\n\nN/A\n\n## Acceptance criteria\n\n- done\n');
+  git(w, ['add', '.']); git(w, ['commit', '-m', 'baseline']);
+  const created = run(w, ['new-task', '--title', 'Same phase value', '--phase', '01']);
+  const id = created.match(/T-[0-9A-HJKMNP-TV-Z]{13}/)?.[0]; assert(id, 'task not created');
+  includes(readFileSync(join(w, 'tasks/phase-01-requirements', `${id}.md`), 'utf8'), '## Phase\n\n01-requirements\n');
+});
+
+check('a claim scope left by another branch warns instead of failing validate', () => {
+  const w = mkdtempSync(join(tmpdir(), 'tri-v3-foreign-')); ensureGit(w);
+  writeFileSync(join(w, 'tri.config.json'), JSON.stringify({ version: 2, profile: 'lite', taskDir: 'tri/tasks', idStrategy: 'random', workflow: 'trunk' }));
+  const dir = join(w, 'tri/tasks/phase-01'); mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'T-0001.md'), task('T-0001'));
+  mkdirSync(join(w, '.tri/claims'), { recursive: true });
+  writeFileSync(join(w, '.tri/claims/T-9999.json'), JSON.stringify({ schemaVersion: 1, owner: 'other', kind: 'task', primaryTasks: ['T-9999'], coveredTasks: [], mayCover: [], responsibilities: [], relatedADRs: [], writePaths: [], sharedPaths: [], forbiddenPaths: [] }));
+  includes(run(w, ['validate']), 'belongs to another branch');
+});
+
 check('graph excludes Withdrawn work', () => {
   const w = mkdtempSync(join(tmpdir(), 'tri-v3-withdrawn-'));
   writeFileSync(join(w, 'tri.config.json'), JSON.stringify({ version: 2, profile: 'lite', taskDir: 'tri/tasks', idStrategy: 'random', workflow: 'trunk' }));
@@ -207,7 +243,7 @@ check('visualization contains board and dependency graph views', () => {
 
 check('metadata exposes the authoritative engine contract', () => {
   const meta = JSON.parse(run(ws, ['meta']));
-  assert(meta.version === '3.2.0', 'wrong metadata version');
+  assert(meta.version === '3.3.0', 'wrong metadata version');
   assert(meta.commands['verify-scope'] && meta.configKeys.includes('idStrategy') && meta.hostAdapters.pi.backend === 'pi-workers', 'metadata incomplete');
   assert(meta.hostAdapters.cursor.backend === 'cursor-task-tri-worker' && meta.hostAdapters.cursor.parallel, 'Cursor adapter missing');
 });
